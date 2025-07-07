@@ -9,7 +9,8 @@ from langchain_community.document_loaders import WikipediaLoader, ArxivLoader
 from langchain_community.vectorstores import FAISS
 import faiss
 from langchain.tools.retriever import create_retriever_tool
-from langchain_community.tools.tavily_search import TavilySearchResults
+# Updated import for Tavily search
+from langchain_tavily import TavilySearch
 import requests
 import os
 from langchain_openai import ChatOpenAI
@@ -29,8 +30,12 @@ from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
 import pytesseract
 
 
-load_dotenv(r"C:\Projects\RAG_PoC\agents_course_hf\.env")
+# Load environment variables - works both locally and on Hugging Face spaces
+load_dotenv(r'C:\Users\axel.grille\Documents\rules-engine-agent\Agent\.env')
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY environment variable is required")
 
 vision_llm = ChatOpenAI(temperature=0)
 
@@ -38,18 +43,24 @@ vision_llm = ChatOpenAI(temperature=0)
 def web_search(query: str) -> str:
     """Search Tavily for a query and return summarized results."""
     try:
-        # Perform the search using TavilySearchResults
-        search_docs = TavilySearchResults(max_results=3).invoke(query)
+        # Perform the search using TavilySearch
+        search_tool = TavilySearch(max_results=3)
+        search_docs = search_tool.invoke(query)
         
-        # Format the results into a readable string
-        formatted_search_docs = "\n\n---\n\n".join(
-            [
-                f"Source: {doc.metadata.get('source', 'Unknown')}\n"
-                f"Page: {doc.metadata.get('page', 'N/A')}\n"
-                f"Content: {doc.page_content[:500]}..."  # Limit content to 500 characters
-                for doc in search_docs
-            ]
-        )
+        # Handle different response formats
+        if isinstance(search_docs, list):
+            # Format the results into a readable string
+            formatted_search_docs = "\n\n---\n\n".join(
+                [
+                    f"Source: {doc.get('url', 'Unknown')}\n"
+                    f"Title: {doc.get('title', 'N/A')}\n"
+                    f"Content: {doc.get('content', '')[:500]}..."  # Limit content to 500 characters
+                    for doc in search_docs
+                ]
+            )
+        else:
+            # If it's a string response, return as is
+            formatted_search_docs = str(search_docs)
         
         return formatted_search_docs
     except Exception as e:
@@ -621,25 +632,62 @@ def combine_images(
         return {"error": str(e)}
 
 
-with open("agents_course_hf\Final_Assignment_Template\system_prompt.txt", "r") as f:
-    system_prompt = f.read()
+# Load system prompt - handle both local and Hugging Face deployment
+try:
+    # Try local path first
+    with open("system_prompt.txt", "r") as f:
+        system_prompt = f.read()
+except FileNotFoundError:
+    # Fallback to a basic system prompt if file not found
+    system_prompt = """You are a helpful assistant with access to multiple tools. When answering questions:
+1. Use tools iteratively to gather information.
+2. Combine results from multiple tools if needed to provide a complete answer.
+3. If one tool doesn't provide enough information, try another relevant tool.
+4. Always provide a concise and accurate response in the format: FINAL ANSWER: [YOUR FINAL ANSWER].
+
+Be resourceful and thorough in your investigation. 
+Only return the FINAL ANSWER. 
+No yapping nor any explanation, just the result of the FINAL ANSWER."""
 
 sys_msg = SystemMessage(content=system_prompt)
 
-# retriever
-
+# retriever - handle both local and Hugging Face deployment
 embeddings = OpenAIEmbeddings()
 
-index = faiss.IndexFlatL2(len(embeddings.embed_query("hello world")))
+# Try to load vector store, but make it optional for deployment
+try:
+    # Try multiple possible paths for vector store
+    vector_store_paths = [
+        "vector_store",  # Current directory
+        "./vector_store",  # Relative path
+        r"C:\Projects\RAG_PoC\agents_course_hf\Final_Assignment_Template\vector_store"  # Original local path
+    ]
+    
+    vector_store = None
+    for path in vector_store_paths:
+        try:
+            vector_store = FAISS.load_local(path, embeddings, allow_dangerous_deserialization=True)
+            print(f"Vector store loaded from: {path}")
+            break
+        except:
+            continue
+    
+    if vector_store is None:
+        print("Warning: Vector store not found. Creating empty vector store.")
+        # Create a minimal vector store with dummy data
+        index = faiss.IndexFlatL2(len(embeddings.embed_query("hello world")))
+        vector_store = FAISS(embeddings, index, {}, {})
 
-vector_store = FAISS.load_local(r"C:\Projects\RAG_PoC\agents_course_hf\Final_Assignment_Template\vector_store", embeddings, allow_dangerous_deserialization=True)
-
+except Exception as e:
+    print(f"Warning: Could not load vector store: {e}")
+    # Create a minimal vector store with dummy data
+    index = faiss.IndexFlatL2(len(embeddings.embed_query("hello world")))
+    vector_store = FAISS(embeddings, index, {}, {})
 
 create_retriever_tool = create_retriever_tool(
     retriever=vector_store.as_retriever(),
     name="Question_search", 
     description="A tool to retrieve similar questions from a vector store."
-
 )
 
 tools = [
@@ -688,25 +736,32 @@ def build_graph():
     
     def retriever(state: MessagesState):
         """Retriever node"""
-        similar_question = vector_store.similarity_search(
+        try:
+            similar_question = vector_store.similarity_search(
             query=state["messages"][0].content,
             k=1
-        )
-        if not similar_question:
-            example_msg = HumanMessage(
-                content="No similar questions were found in the vector store."
             )
-        else:
-            example_msg = HumanMessage(
-                content=f"Here I provide a similar question and answer for reference: \n\n{similar_question[0].page_content}",
-            )
-        return {"messages": [sys_msg] + state["messages"] + [example_msg]}
+            if not similar_question:
+                example_msg = HumanMessage(
+                    content="No similar questions were found in the vector store."
+                )
+                print("ℹ️ No similar questions found")
+            else:
+                example_msg = HumanMessage(
+                    content=f"Here I provide a similar question and answer for reference: \n\n{similar_question[0].page_content}",
+                )
+                print("✅ Similar question found for reference")
+            return {"messages": [sys_msg] + state["messages"] + [example_msg]}
+        except Exception as e:
+            print(f"❌ Retriever error: {e}")
+            # Return minimal state if retriever fails
+            return {"messages": [sys_msg] + state["messages"]}
 
+    print("🔧 Setting up graph nodes...")
     builder = StateGraph(MessagesState)
     builder.add_node("retriever", retriever)
     builder.add_node("assistant", assistant)
     builder.add_node("tools", ToolNode(tools))
-
 
     builder.add_edge(START, "retriever")
     builder.add_edge("retriever", "assistant")
@@ -716,6 +771,7 @@ def build_graph():
     )
     builder.add_edge("tools", "assistant")
 
+    print("✅ Graph compilation complete")
     # Compile graph
     return builder.compile()
 

@@ -1,33 +1,33 @@
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 import base64 
-from langchain_core.messages import HumanMessage
-from dotenv import load_dotenv
 import os
+import requests
+import uuid
+import faiss
+import tempfile
+import pytesseract
+
+import pandas as pd
+import numpy as np
+
+from typing import Optional, Dict, Any, List 
+from dotenv import load_dotenv
+from urllib.parse import urlparse 
+from image_processing import *
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
+from code_interpreter import CodeInterpreter
+
 from langchain_core.tools import tool
+from langgraph.prebuilt import ToolNode, tools_condition
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph import StateGraph, START, MessagesState
+
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.tools.riza.command import ExecPython
 from langchain_community.document_loaders import WikipediaLoader, ArxivLoader
 from langchain_community.vectorstores import FAISS
-import faiss
 from langchain.tools.retriever import create_retriever_tool
-# Updated import for Tavily search
 from langchain_tavily import TavilySearch
-import requests
-import os
-from langchain_openai import ChatOpenAI
-from dotenv import load_dotenv
-from langgraph.graph import StateGraph, START, MessagesState
-from typing import Optional, Dict, Any, List 
-import numpy as np
-from image_processing import *
-from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.prebuilt import ToolNode, tools_condition
-import pandas as pd
-import tempfile
-import requests 
-import uuid
-from urllib.parse import urlparse 
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
-import pytesseract
 
 
 # Load environment variables - works both locally and on Hugging Face spaces
@@ -37,7 +37,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable is required")
 
-vision_llm = ChatOpenAI(temperature=0)
+# Diffusion model for image processing
+vision_llm = ChatOpenAI(temperature=0) 
 
 @tool
 def web_search(query: str) -> str:
@@ -179,20 +180,44 @@ def exponent(a: int, b: int) -> int:
     """
     return a ** b
 
-@tool
-def python_code_executor(code: str) -> str:
-    """ Executes a Python code snippet and returns the results
+## Uses riza command to execute python code snippets, not working well
+
+# @tool
+# def python_code_executor(code: str) -> str:
+#     """ Executes a Python code snippet and returns the results
     
-    Args:
-        code: str, the Python code to execute
+#     Args:
+#         code: str, the Python code to execute
+#     """
+#     try:
+#         exec_python = ExecPython()
+#         result = exec_python.run(code)
+#         return result
+#     except Exception as e:
+#         return f"Error executing code: {str(e)}"
+    
+
+@tool 
+def code_executor(code: str, language : str = "python") -> str: 
+    """
+    Executes a code snippet and returns the results.
+
+    Supports python, bash, sql, c, java
+
+    Args: 
+        code: str, the code to execute
+        language: str, the programming language of the code snippet (python by default)
+
+    Returns: 
+        str: the result of the code execution or an error message if execution fails.
     """
     try:
-        exec_python = ExecPython()
-        result = exec_python.run(code)
+        interpreter = CodeInterpreter()
+        result = interpreter.execute_code(code, language=language)
         return result
     except Exception as e:
         return f"Error executing code: {str(e)}"
-    
+
 
 @tool
 def wiki_search(query: str) -> str:
@@ -720,7 +745,7 @@ tools = [
     analyze_excel_file,
     
     # Code Execution
-    python_code_executor
+    code_executor
 ]
 
 
@@ -787,3 +812,7 @@ if __name__ == "__main__":
     messages = graph.invoke({"messages": messages})
     for m in messages["messages"]:
         m.pretty_print()
+
+
+## TODO: ADD MEMORY TO THE AGENT
+

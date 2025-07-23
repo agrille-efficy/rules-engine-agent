@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from image_processing import *
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
 from code_interpreter import CodeInterpreter
+from openai import OpenAI
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -304,23 +305,60 @@ def download_file_from_url(url: str, filename: Optional[str] = None) -> str:
         return f"Error downloading file: {str(e)}"
 
 
+# @tool
+# def extract_text_from_image(image_path: str) -> str:
+#     """
+#     Extract text from an image using OCR library pytesseract (if available).
+#     Args:
+#         image_path (str): the path to the image file.
+#     """
+#     try:
+#         # Open the image
+#         image = Image.open(image_path)
+
+#         # Extract text from the image
+#         text = pytesseract.image_to_string(image)
+
+#         return f"Extracted text from image:\n\n{text}"
+#     except Exception as e:
+#         return f"Error extracting text from image: {str(e)}"
+
 @tool
-def extract_text_from_image(image_path: str) -> str:
+def extract_structured_data_from_image(image_path: str) -> str:
     """
-    Extract text from an image using OCR library pytesseract (if available).
+    Classify the document and extract structured data from an image using a vision model. 
     Args:
-        image_path (str): the path to the image file.
+        image_base64 (str): Base64 encoded image string
+    Returns: 
+        str: Vision model response with structured data extraction.
     """
     try:
-        # Open the image
-        image = Image.open(image_path)
 
-        # Extract text from the image
-        text = pytesseract.image_to_string(image)
+        loaded_img = load_local_image(image_path)
+        base64_image = encode_image(loaded_img)
 
-        return f"Extracted text from image:\n\n{text}"
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        response = client.response.create(
+            model=vision_llm.model.name,
+
+            input=[ 
+            {
+                "role" : "user",
+                "content" : [ 
+                    {"type": "input_text", "text": "Read the following document, identify which kind of document it is and organize the data into structured data."},
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:image/png;base64,{base64_image}",
+                    }
+                ],
+            },
+            ],
+        )
+        return response.output_text
+    
     except Exception as e:
-        return f"Error extracting text from image: {str(e)}"
+        return f"Error extracting structured data from image: {str(e)}" 
+
 
 
 @tool
@@ -723,7 +761,7 @@ tools = [
     
     # Image Processing Tools
     image_describer,
-    extract_text_from_image,
+    extract_structured_data_from_image,
     analyze_image,
     transform_image,
     draw_on_image,

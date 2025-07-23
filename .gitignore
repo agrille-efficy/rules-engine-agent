@@ -3,3 +3,4 @@ Agent/.env
 __pycache__/
 Agent/__pycache__/*.pyc
 Agent/__pycache__/agent.cpython-313.pyc
+./.venv

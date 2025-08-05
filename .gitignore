@@ -4,3 +4,8 @@ __pycache__/
 Agent/__pycache__/*.pyc
 Agent/__pycache__/agent.cpython-313.pyc
 ./.venv
+Agent/test.ipynb
+.gradio/certificate.pem
+Agent/.gradio/*
+
+Agent/__pycache__/*

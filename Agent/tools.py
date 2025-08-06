@@ -10,6 +10,9 @@ from PIL import Image
 import pytesseract
 from dotenv import load_dotenv
 
+# Import SQLCodeParser from app.py
+from app import SQLCodeParser
+
 # PDF processing imports
 try:
     import PyPDF2
@@ -330,25 +333,25 @@ def generate_sql_schema(analysis_result: str, table_name: str = None) -> str:
     """
     try:
         # Use vision model to generate SQL from analysis
-        prompt = f"""
-        Based on the following file analysis, generate SQL statements for database ingestion:
+        prompt = f"""Based on the following file analysis, generate ONLY SQL statements for database ingestion:
 
-        {analysis_result}
-        
-        Please provide:
-        1. A CREATE TABLE statement with appropriate data types
-        2. Sample INSERT statements
-        3. Use table name: {table_name if table_name else 'extracted_data'}
-        
-        Make sure to:
-        - Use appropriate SQL data types (VARCHAR, INTEGER, DECIMAL, DATETIME, etc.)
-        - Include NOT NULL constraints where appropriate
-        - Create meaningful column names
-        - Provide at least 2-3 sample INSERT statements
-        """
+{analysis_result}
+
+Requirements:
+- CREATE TABLE statement with appropriate data types for table: {table_name if table_name else 'extracted_data'}
+- 2-3 sample INSERT statements
+- Use SQL data types: VARCHAR, INTEGER, DECIMAL, DATETIME, TEXT, etc.
+- Include NOT NULL constraints where appropriate
+- Create meaningful column names
+
+IMPORTANT: Return ONLY the SQL code. No explanations, no markdown formatting, no code blocks. Start directly with CREATE TABLE and end with the last INSERT statement."""
         
         response = vision_llm([HumanMessage(content=prompt)])
-        return response.content
+        
+        # Use the robust SQLCodeParser to clean the response
+        clean_sql = SQLCodeParser.extract_sql_code(response.content)
+        
+        return clean_sql
     
     except Exception as e:
         return f"Error generating SQL: {str(e)}"

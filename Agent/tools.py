@@ -1,305 +1,387 @@
-# from langchain_community.tools import DuckDuckGoSearchRun
-# from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
-# from langchain.tools import Tool
-# from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-# import base64 
-# from langchain_core.messages import HumanMessage
-# from dotenv import load_dotenv
-# import os
-# from langchain_core.tools import tool
-# from langchain_community.tools.riza.command import ExecPython
-# from langchain_community.document_loaders import WikipediaLoader, ArxivLoader
-# from langchain_community.vectorstores import FAISS
-# import faiss
-# from langchain_community.docstore.in_memory import InMemoryDocstore
-# from langchain.tools.retriever import create_retriever_tool
+import os
+import pandas as pd
+import json
+import base64
+from typing import Dict, Any, Optional
+from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage
+from langchain_openai import ChatOpenAI
+from PIL import Image
+import pytesseract
+from dotenv import load_dotenv
 
-# from agents_course_hf.agentic_rag import tools
+# PDF processing imports
+try:
+    import PyPDF2
+    import pdfplumber
+    import fitz  # PyMuPDF
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
 
-# import os
-# import gradio as gr
-# import requests
-# import inspect
-# import pandas as pd
-# import re
-# import json
-# from langchain_openai import ChatOpenAI
-# from dotenv import load_dotenv
-# from langgraph.graph import StateGraph, END, START, MessagesState
-# from langgraph.graph.message import add_messages
-# from typing import TypedDict, Annotated, Optional
-# from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage, AIMessage
-# from langgraph.prebuilt import ToolNode, tools_condition
+load_dotenv()
+vision_llm = ChatOpenAI(model="gpt-4o")
 
-
-# system_prompt = """
-#         You are a general AI assistant. I will ask you a question.
-
-#         First, explore your reasoning process step by step. Consider all relevant facts and possibilities.
-
-#         Then, provide your answer using EXACTLY this format:
-
-#         FINAL ANSWER: [ Your consice answer here]
-
-#         Your FINAL ANSWER should be:
-#         - For numbers: Just the number without commas or units (unless specified)
-#         - For text: As few words as possible with no articles or abbreviations 
-#         - For lists: Comma-separated values following the above rules
-
-#         Important: The evaluation system will ONLY read what comes after "FINAL ANSWER:". Make sure your answer is correctly formatted.
-
-#         """
-
-# load_dotenv(r"C:\Projects\RAG_PoC\agents_course_hf\.env")
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-# vision_llm = ChatOpenAI(model="gpt-4o")
-# search = DuckDuckGoSearchAPIWrapper()
-
-# @tool
-# def search_function(query: str) -> str:
-#     """Search the web for information."""
-#     try:
-#         results = search.run(query)
-#         if not results or results.strip() == "":
-#             return "No search results found. Please try a different query."
-#         return results
-#     except Exception as e:
-#         return f"Error during search: {str(e)}"
-
-
-# @tool
-# def image_describer(image_url: str) -> str:
-#     """Describes the content of an image."""
-
-#     description = ""
-
-#     try:
-#         import requests 
-#         response = requests.get(image_url)
-#         image_bytes = response.content
-#         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-
-#         message = [
-#             HumanMessage(
-#                 content=[
-#                     {
-#                     "type": "text",
-#                     "text": (
-#                         "Describe the type of image you see, if it is a photo, a drawing, a painting, etc. "
-#                         "Then describe the content of the image in the most detailled way possible. "
-#                         "You will start by describing the front of the image, then the back of the image if possible. "
-#                         "If the image contains text, you will extract it and describe it in the most detailler way possible. "
-#                         "If the image is a document, you will extract the text. Return only the text in this case, no explanations."
-                        
-#                         ),
-#                     },
-#                     {
-#                         "type": "image_url",
-#                         "image_url": {
-#                             "url": f"data:image/png;base64,{image_base64}",
-#                         }
-#                     }
-#                 ]
-#             )
-#         ]
-
-#         # call the vision model
-#         response = vision_llm(message)
-#         description += response.content + "\n\n"
-
-#         return description.strip()
-
-#     except Exception as e:
-#         print(f"Error reading image file: {e}")
-#         return "Error reading image file."
-
-
-
-
-# @tool
-# def addition(a: int, b: int) -> int:
-#     """Adds two numbers.
+@tool
+def analyze_file(file_path: str) -> str:
+    """
+    Analyze various file types including PDF, CSV, Excel, JSON, images, and text files.
+    Extracts content and provides structured analysis for database ingestion.
     
-#     Args: 
-#         a: first int
-#         b: second int
-#     """
-#     return a + b
-
-
-# @tool
-# def subtract(a: int, b: int) -> int:
-#     """Substract two numbers.
+    Args:
+        file_path: Path to the file to analyze
+    """
+    if not os.path.exists(file_path):
+        return f"Error: File not found at {file_path}"
     
-#     Args: 
-#         a: first int
-#         b: second int
-#     """
-#     return a - b
-
-# @tool
-# def multiply(a: int, b: int) -> int: 
-#     """Multiply two numbers.
+    file_extension = os.path.splitext(file_path)[1].lower()
     
-#     Args: 
-#         a: first int
-#         b: second int
-#     """
-#     return a * b
-
-# @tool
-# def divide(a: int, b: int) -> float:
-#     """Divide two numbers.
+    try:
+        if file_extension == '.pdf':
+            return _analyze_pdf(file_path)
+        elif file_extension in ['.csv']:
+            return _analyze_csv(file_path)
+        elif file_extension in ['.xlsx', '.xls']:
+            return _analyze_excel(file_path)
+        elif file_extension == '.json':
+            return _analyze_json(file_path)
+        elif file_extension in ['.png', '.jpg', '.jpeg', '.gif', '.bmp']:
+            return _analyze_image(file_path)
+        elif file_extension in ['.txt', '.xml']:
+            return _analyze_text(file_path)
+        else:
+            return f"Unsupported file type: {file_extension}"
     
-#     Args: 
-#         a: first int
-#         b: second int
-#     """
-#     if b == 0:
-#         return "Error: Division by zero is not allowed."
-#     return a / b
+    except Exception as e:
+        return f"Error analyzing file: {str(e)}"
 
-# @tool 
-# def modulus(a: int, b: int) -> int:
-#     """Modulus two numbers.
+def _analyze_pdf(file_path: str) -> str:
+    """Analyze PDF files with text extraction and OCR fallback."""
+    if not PDF_AVAILABLE:
+        return "Error: PDF processing libraries not installed. Please install PyPDF2, pdfplumber, and PyMuPDF."
     
-#     Args: 
-#         a: first int
-#         b: second int
-#     """
-#     return a % b
-
-# @tool
-# def exponent(a: int, b: int) -> int:
-#     """Exponent two numbers.
+    results = []
+    text_content = ""
     
-#     Args: 
-#         a: first int
-#         b: second int
-#     """
-#     return a ** b
-
-# @tool
-# def python_code_executor(code: str) -> str:
-#     """ Executes a Python code snippet and returns the results
+    # Try text extraction first
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            text_pages = []
+            for i, page in enumerate(pdf.pages):
+                page_text = page.extract_text()
+                if page_text:
+                    text_pages.append(f"Page {i+1}:\n{page_text}")
+            
+            if text_pages:
+                text_content = "\n\n".join(text_pages)
+    except Exception as e:
+        results.append(f"Text extraction error: {str(e)}")
     
-#     Args:
-#         code: str, the Python code to execute
-#     """
-#     try:
-#         exec_python = ExecPython()
-#         result = exec_python.run(code)
-#         return result
-#     except Exception as e:
-#         return f"Error executing code: {str(e)}"
+    # If no text found, try OCR on PDF images
+    if not text_content.strip():
+        try:
+            doc = fitz.open(file_path)
+            ocr_pages = []
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                pix = page.get_pixmap()
+                img_data = pix.tobytes("png")
+                
+                # Use vision model for better OCR
+                image_base64 = base64.b64encode(img_data).decode('utf-8')
+                ocr_text = _extract_text_from_image_base64(image_base64)
+                if ocr_text:
+                    ocr_pages.append(f"Page {page_num+1} (OCR):\n{ocr_text}")
+            
+            if ocr_pages:
+                text_content = "\n\n".join(ocr_pages)
+            doc.close()
+        except Exception as e:
+            results.append(f"OCR error: {str(e)}")
     
-
-# @tool 
-# def wikipedia_search(query: str) -> str:
-#     """Search Wikipedia for a given query and return the 2 first.
+    if text_content:
+        results.append(f"PDF Content Analysis:\n{text_content[:2000]}...")
+        
+        # Analyze structure for database design
+        lines = text_content.split('\n')
+        potential_headers = [line.strip() for line in lines[:20] if line.strip() and len(line.strip()) < 100]
+        
+        results.append(f"\nStructural Analysis:")
+        results.append(f"- Total pages: {len(text_content.split('Page '))}")
+        results.append(f"- Potential headers/fields: {potential_headers[:5]}")
+        
+        # Look for tabular data patterns
+        table_patterns = []
+        for line in lines:
+            if '|' in line or '\t' in line or ',' in line:
+                table_patterns.append(line.strip())
+        
+        if table_patterns:
+            results.append(f"- Potential tabular data found: {len(table_patterns)} lines")
+            results.append(f"- Sample: {table_patterns[0][:100]}...")
     
-#     Args:
-#         query: str, the search query
-#     """
-
-#     try:
-#         search_documents = WikipediaLoader(query=query, max_results=2).load()
-#         results = "\n".join([doc.page_content for doc in search_documents])
-#         return results
-#     except Exception as e:
-#         return f"Error during Wikipedia search: {str(e)}"
+    else:
+        results.append("No text content could be extracted from the PDF")
     
+    return "\n".join(results)
 
-# @tool
-# def arvix_search(query: str) -> str:
-#     """Search Arxiv for a query and return maximum 3 result.
+def _analyze_csv(file_path: str) -> str:
+    """Analyze CSV files for database schema generation."""
+    try:
+        df = pd.read_csv(file_path)
+        
+        results = []
+        results.append(f"CSV Analysis for: {os.path.basename(file_path)}")
+        results.append(f"Dimensions: {df.shape[0]} rows × {df.shape[1]} columns")
+        results.append(f"Columns: {list(df.columns)}")
+        
+        # Data types analysis
+        results.append("\nData Types Analysis:")
+        for col in df.columns:
+            dtype = df[col].dtype
+            null_count = df[col].isnull().sum()
+            unique_count = df[col].nunique()
+            
+            # Infer SQL data type
+            if dtype == 'object':
+                max_length = df[col].astype(str).str.len().max()
+                sql_type = f"VARCHAR({min(max_length + 50, 500)})"
+            elif dtype in ['int64', 'int32']:
+                sql_type = "INTEGER"
+            elif dtype in ['float64', 'float32']:
+                sql_type = "DECIMAL(10,2)"
+            elif 'datetime' in str(dtype):
+                sql_type = "DATETIME"
+            else:
+                sql_type = "TEXT"
+            
+            results.append(f"  {col}: {sql_type} (nulls: {null_count}, unique: {unique_count})")
+        
+        # Sample data
+        results.append(f"\nSample Data (first 3 rows):")
+        results.append(df.head(3).to_string())
+        
+        return "\n".join(results)
     
-#     Args:
-#         query: The search query."""
-#     search_docs = ArxivLoader(query=query, load_max_docs=3).load()
-#     formatted_search_docs = "\n\n---\n\n".join(
-#         [
-#             f'<Document source="{doc.metadata["source"]}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content[:1000]}\n</Document>'
-#             for doc in search_docs
-#         ])
-#     return {"arvix_results": formatted_search_docs}
+    except Exception as e:
+        return f"Error analyzing CSV: {str(e)}"
 
-# # retriever
-
-# embeddings = OpenAIEmbeddings()
-
-# index = faiss.IndexFlatL2(len(embeddings.embed_query("hello world")))
-
-# vector_store = FAISS(
-#     embedding_function=embeddings,
-#     index=index,
-#     docstore=InMemoryDocstore(),
-#     index_to_docstore_id={}
-# )
-
-# create_retriever_tool = create_retriever_tool(
-#     retriever=vector_store.as_retriever(),
-#     name="Question search", 
-#     description="A tool to retrieve similar questions from a vector store."
-
-# )
-
-# tools = [
-#     search_function,
-#     image_describer,
-#     addition,
-#     subtract,
-#     multiply,
-#     divide,
-#     modulus,
-#     exponent,
-#     python_code_executor,
-#     wikipedia_search,
-#     arvix_search,
-#     create_retriever_tool
-# ]
-
-
-# def build_graph():
-#     """Build the graph"""
-#     chat = ChatOpenAI(model="gpt-4o")
-#     chat_with_tools = chat.bind_tools(tools)
-
-#     def assistant(state: MessagesState):
-#         return {
-#             "messages": [chat_with_tools.invoke(state["messages"])]
-#         }
+def _analyze_excel(file_path: str) -> str:
+    """Analyze Excel files for database schema generation."""
+    try:
+        # Get all sheet names
+        excel_file = pd.ExcelFile(file_path)
+        sheet_names = excel_file.sheet_names
+        
+        results = []
+        results.append(f"Excel Analysis for: {os.path.basename(file_path)}")
+        results.append(f"Sheets found: {sheet_names}")
+        
+        # Analyze each sheet
+        for sheet_name in sheet_names[:3]:  # Limit to first 3 sheets
+            df = pd.read_excel(file_path, sheet_name=sheet_name)
+            
+            results.append(f"\n--- Sheet: {sheet_name} ---")
+            results.append(f"Dimensions: {df.shape[0]} rows × {df.shape[1]} columns")
+            results.append(f"Columns: {list(df.columns)}")
+            
+            # Data types for first sheet only (to avoid too much output)
+            if sheet_name == sheet_names[0]:
+                results.append("\nData Types Analysis:")
+                for col in df.columns:
+                    dtype = df[col].dtype
+                    if dtype == 'object':
+                        max_length = df[col].astype(str).str.len().max()
+                        sql_type = f"VARCHAR({min(max_length + 50, 500)})"
+                    elif dtype in ['int64', 'int32']:
+                        sql_type = "INTEGER"
+                    elif dtype in ['float64', 'float32']:
+                        sql_type = "DECIMAL(10,2)"
+                    else:
+                        sql_type = "TEXT"
+                    
+                    results.append(f"  {col}: {sql_type}")
+                
+                results.append(f"\nSample Data:")
+                results.append(df.head(2).to_string())
+        
+        return "\n".join(results)
     
-#     def retriever(state: MessagesState):
-#         """Retriever node"""
-#         similar_question = vector_store.similarity_search(state["messages"][0].content)
-#         example_msg = HumanMessage(
-#             content=f"Here I provide a similar question and answer for reference: \n\n{similar_question[0].page_content}",
-#         )
-#         return {"messages": [system_prompt] + state["messages"] + [example_msg]}
+    except Exception as e:
+        return f"Error analyzing Excel: {str(e)}"
 
-#     builder = StateGraph(MessagesState)
-#     builder.add_node("retriever", retriever)
-#     builder.add_node("assistant", assistant)
-#     builder.add_node("tools", ToolNode(tools))
-#     builder.add_edge(START, "retriever")
-#     builder.add_edge("retriever", "assistant")
-#     builder.add_conditional_edges(
-#         "assistant",
-#         tools_condition,
-#     )
-#     builder.add_edge("tools", "assistant")
+def _analyze_json(file_path: str) -> str:
+    """Analyze JSON files for database schema generation."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        results = []
+        results.append(f"JSON Analysis for: {os.path.basename(file_path)}")
+        
+        if isinstance(data, list):
+            results.append(f"Type: Array with {len(data)} items")
+            if data:
+                sample_item = data[0]
+                results.append(f"Sample item structure: {list(sample_item.keys()) if isinstance(sample_item, dict) else type(sample_item)}")
+        elif isinstance(data, dict):
+            results.append(f"Type: Object with {len(data)} keys")
+            results.append(f"Keys: {list(data.keys())}")
+        
+        # Show structure
+        results.append(f"\nStructure Preview:")
+        results.append(json.dumps(data, indent=2)[:1000] + "..." if len(str(data)) > 1000 else json.dumps(data, indent=2))
+        
+        return "\n".join(results)
+    
+    except Exception as e:
+        return f"Error analyzing JSON: {str(e)}"
 
-#     # Compile graph
-#     return builder.compile()
+def _analyze_image(file_path: str) -> str:
+    """Analyze images using vision model for structured data extraction."""
+    try:
+        with open(file_path, 'rb') as f:
+            image_bytes = f.read()
+        
+        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+        
+        message = [
+            HumanMessage(
+                content=[
+                    {
+                        "type": "text",
+                        "text": (
+                            "Analyze this image for structured data extraction and database ingestion. "
+                            "If this is a document (invoice, form, receipt, etc.), extract all text and organize it into structured fields. "
+                            "If it contains tabular data, identify columns and rows. "
+                            "Provide the extracted information in a clear, structured format suitable for database storage. "
+                            "Also suggest appropriate database field names and data types."
+                        ),
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{image_base64}",
+                        }
+                    }
+                ]
+            )
+        ]
+        
+        response = vision_llm(message)
+        return f"Image Analysis for: {os.path.basename(file_path)}\n\n{response.content}"
+    
+    except Exception as e:
+        return f"Error analyzing image: {str(e)}"
 
-# if __name__ == "__main__":
-#     question = "When was a picture of St. Thomas Aquinas first added to the Wikipedia page on the Principle of double effect?"
-#     # Build the graph
-#     graph = build_graph()
-#     # Run the graph
-#     messages = [HumanMessage(content=question)]
-#     messages = graph.invoke({"messages": messages})
-#     for m in messages["messages"]:
-#         m.pretty_print()
+def _extract_text_from_image_base64(image_base64: str) -> str:
+    """Extract text from image using vision model."""
+    try:
+        message = [
+            HumanMessage(
+                content=[
+                    {
+                        "type": "text",
+                        "text": "Extract all text from this image. Return only the text content, no explanations.",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{image_base64}",
+                        }
+                    }
+                ]
+            )
+        ]
+        
+        response = vision_llm(message)
+        return response.content
+    except:
+        return ""
+
+def _analyze_text(file_path: str) -> str:
+    """Analyze text and XML files."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        results = []
+        results.append(f"Text Analysis for: {os.path.basename(file_path)}")
+        results.append(f"File size: {len(content)} characters")
+        results.append(f"Lines: {len(content.split(chr(10)))}")
+        
+        # Show preview
+        results.append(f"\nContent Preview:")
+        results.append(content[:1000] + "..." if len(content) > 1000 else content)
+        
+        return "\n".join(results)
+    
+    except Exception as e:
+        return f"Error analyzing text file: {str(e)}"
+
+@tool
+def generate_sql_schema(analysis_result: str, table_name: str = None) -> str:
+    """
+    Generate CREATE TABLE and INSERT SQL statements based on file analysis.
+    
+    Args:
+        analysis_result: The result from analyze_file function
+        table_name: Optional custom table name
+    """
+    try:
+        # Use vision model to generate SQL from analysis
+        prompt = f"""
+        Based on the following file analysis, generate SQL statements for database ingestion:
+
+        {analysis_result}
+        
+        Please provide:
+        1. A CREATE TABLE statement with appropriate data types
+        2. Sample INSERT statements
+        3. Use table name: {table_name if table_name else 'extracted_data'}
+        
+        Make sure to:
+        - Use appropriate SQL data types (VARCHAR, INTEGER, DECIMAL, DATETIME, etc.)
+        - Include NOT NULL constraints where appropriate
+        - Create meaningful column names
+        - Provide at least 2-3 sample INSERT statements
+        """
+        
+        response = vision_llm([HumanMessage(content=prompt)])
+        return response.content
+    
+    except Exception as e:
+        return f"Error generating SQL: {str(e)}"
+
+@tool
+def python_code_executor(code: str) -> str:
+    """
+    Execute Python code for data processing and analysis.
+    
+    Args:
+        code: Python code to execute
+    """
+    try:
+        # Create a safe execution environment
+        exec_globals = {
+            'pd': pd,
+            'json': json,
+            'os': os,
+            '__builtins__': __builtins__
+        }
+        exec_locals = {}
+        
+        exec(code, exec_globals, exec_locals)
+        
+        # Return any printed output or results
+        return "Code executed successfully. Check variables in exec_locals if needed."
+    
+    except Exception as e:
+        return f"Error executing code: {str(e)}"
+
+# Available tools for the agent
+tools = [
+    analyze_file,
+    generate_sql_schema,
+    python_code_executor
+]

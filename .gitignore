@@ -1,11 +1,23 @@
+# Environment files
 Agent/.env
+.env
+
+# Python cache files
 *.pyc
 __pycache__/
-Agent/__pycache__/*.pyc
-Agent/__pycache__/agent.cpython-313.pyc
-./.venv
-Agent/test.ipynb
-.gradio/certificate.pem
-Agent/.gradio/*
 
-Agent/__pycache__/*
+# Virtual environment
+.venv/
+venv/
+
+# Jupyter notebooks (if you don't want to track them)
+Agent/test.ipynb
+*.ipynb
+
+# Gradio files
+.gradio/
+Agent/.gradio/
+
+# OS files
+.DS_Store
+Thumbs.db

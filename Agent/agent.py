@@ -40,33 +40,6 @@ if not OPENAI_API_KEY:
 # Vision model for image processing
 vision_llm = ChatOpenAI(temperature=0) 
 
-# @tool
-# def web_search(query: str) -> str:
-#     """Search Tavily for a query and return summarized results."""
-#     try:
-#         # Perform the search using TavilySearch
-#         search_tool = TavilySearch(max_results=3)
-#         search_docs = search_tool.invoke(query)
-        
-#         # Handle different response formats
-#         if isinstance(search_docs, list):
-#             # Format the results into a readable string
-#             formatted_search_docs = "\n\n---\n\n".join(
-#                 [
-#                     f"Source: {doc.get('url', 'Unknown')}\n"
-#                     f"Title: {doc.get('title', 'N/A')}\n"
-#                     f"Content: {doc.get('content', '')[:500]}..."  # Limit content to 500 characters
-#                     for doc in search_docs
-#                 ]
-#             )
-#         else:
-#             # If it's a string response, return as is
-#             formatted_search_docs = str(search_docs)
-        
-#         return formatted_search_docs
-#     except Exception as e:
-#         return f"Error during web search: {str(e)}"
-
 
 @tool
 def image_describer(image_url: str) -> str:
@@ -117,68 +90,6 @@ def image_describer(image_url: str) -> str:
 
 
 
-@tool
-def add(a: int, b: int) -> int:
-    """Adds two numbers.
-    
-    Args: 
-        a: first int
-        b: second int
-    """
-    return a + b
-
-
-@tool
-def subtract(a: int, b: int) -> int:
-    """Substract two numbers.
-    
-    Args: 
-        a: first int
-        b: second int
-    """
-    return a - b
-
-@tool
-def multiply(a: int, b: int) -> int: 
-    """Multiply two numbers.
-    
-    Args: 
-        a: first int
-        b: second int
-    """
-    return a * b
-
-@tool
-def divide(a: int, b: int) -> float:
-    """Divide two numbers.
-    
-    Args: 
-        a: first int
-        b: second int
-    """
-    if b == 0:
-        return "Error: Division by zero is not allowed."
-    return a / b
-
-@tool 
-def modulus(a: int, b: int) -> int:
-    """Modulus two numbers.
-    
-    Args: 
-        a: first int
-        b: second int
-    """
-    return a % b
-
-@tool
-def exponent(a: int, b: int) -> int:
-    """Exponent two numbers.
-    
-    Args: 
-        a: first int
-        b: second int
-    """
-    return a ** b
 
 @tool 
 def code_executor(code: str, language : str = "python") -> str: 
@@ -201,39 +112,6 @@ def code_executor(code: str, language : str = "python") -> str:
     except Exception as e:
         return f"Error executing code: {str(e)}"
 
-
-# @tool
-# def wiki_search(query: str) -> str:
-#     """Search Wikipedia for a query and return summarized results."""
-#     try:
-#         search_docs = WikipediaLoader(query=query, load_max_docs=3).load()
-#         summarized_results = []
-#         for doc in search_docs:
-#             content = doc.page_content
-#             # Summarize or extract key sections
-#             summarized_results.append(content[:500])  
-
-#         return "\n\n---\n\n".join(summarized_results)
-#     except Exception as e:
-#         return f"Error during Wikipedia search: {str(e)}"
-    
-
-# @tool
-# def arxiv_search(query: str) -> str:
-#     """Search Arxiv for a query and return maximum 3 result.
-#     Args:
-#         query: The search query."""
-#     try:
-#         search_docs = ArxivLoader(query=query, load_max_docs=3).load()
-#         formatted_search_docs = "\n\n---\n\n".join(
-#             [
-#                 f'<Document source="{doc.metadata["source"]}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content[:1000]}\n</Document>'
-#                 for doc in search_docs
-#             ]
-#         )
-#         return formatted_search_docs
-#     except Exception as e:
-#         return f"Error during Arxiv search: {str(e)}"
 
 
 @tool
@@ -380,320 +258,23 @@ def analyze_excel_file(file_path: str, query: str) -> str:
 
     except Exception as e:
         return f"Error analyzing Excel file: {str(e)}"
-    
-@tool
-def analyze_image(image_base64: str) -> Dict[str, Any]:
-    """
-    Analyze basic properties of an image (size, mode, color analysis, thumbnail preview).
-    Args:
-        image_base64 (str): Base64 encoded image string
-    Returns:
-        Dictionary with analysis result
-    """
-    try:
-        img = decode_image(image_base64)
-        width, height = img.size
-        mode = img.mode
-
-        if mode in ("RGB", "RGBA"):
-            arr = np.array(img)
-            avg_colors = arr.mean(axis=(0, 1))
-            dominant = ["Red", "Green", "Blue"][np.argmax(avg_colors[:3])]
-            brightness = avg_colors.mean()
-            color_analysis = {
-                "average_rgb": avg_colors.tolist(),
-                "brightness": brightness,
-                "dominant_color": dominant,
-            }
-        else:
-            color_analysis = {"note": f"No color analysis for mode {mode}"}
-
-        thumbnail = img.copy()
-        thumbnail.thumbnail((100, 100))
-        thumb_path = save_image(thumbnail, "thumbnails")
-        thumbnail_base64 = encode_image(thumb_path)
-
-        return {
-            "dimensions": (width, height),
-            "mode": mode,
-            "color_analysis": color_analysis,
-            "thumbnail": thumbnail_base64,
-        }
-    except Exception as e:
-        return {"error": str(e)}
 
 
-@tool
-def transform_image(
-    image_base64: str, operation: str, params: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """
-    Apply transformations: resize, rotate, crop, flip, brightness, contrast, blur, sharpen, grayscale.
-    Args:
-        image_base64 (str): Base64 encoded input image
-        operation (str): Transformation operation
-        params (Dict[str, Any], optional): Parameters for the operation
-    Returns:
-        Dictionary with transformed image (base64)
-    """
-    try:
-        img = decode_image(image_base64)
-        params = params or {}
-
-        if operation == "resize":
-            img = img.resize(
-                (
-                    params.get("width", img.width // 2),
-                    params.get("height", img.height // 2),
-                )
-            )
-        elif operation == "rotate":
-            img = img.rotate(params.get("angle", 90), expand=True)
-        elif operation == "crop":
-            img = img.crop(
-                (
-                    params.get("left", 0),
-                    params.get("top", 0),
-                    params.get("right", img.width),
-                    params.get("bottom", img.height),
-                )
-            )
-        elif operation == "flip":
-            if params.get("direction", "horizontal") == "horizontal":
-                img = img.transpose(Image.FLIP_LEFT_RIGHT)
-            else:
-                img = img.transpose(Image.FLIP_TOP_BOTTOM)
-        elif operation == "adjust_brightness":
-            img = ImageEnhance.Brightness(img).enhance(params.get("factor", 1.5))
-        elif operation == "adjust_contrast":
-            img = ImageEnhance.Contrast(img).enhance(params.get("factor", 1.5))
-        elif operation == "blur":
-            img = img.filter(ImageFilter.GaussianBlur(params.get("radius", 2)))
-        elif operation == "sharpen":
-            img = img.filter(ImageFilter.SHARPEN)
-        elif operation == "grayscale":
-            img = img.convert("L")
-        else:
-            return {"error": f"Unknown operation: {operation}"}
-
-        result_path = save_image(img)
-        result_base64 = encode_image(result_path)
-        return {"transformed_image": result_base64}
-
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@tool
-def draw_on_image(
-    image_base64: str, drawing_type: str, params: Dict[str, Any]
-) -> Dict[str, Any]:
-    """
-    Draw shapes (rectangle, circle, line) or text onto an image.
-    Args:
-        image_base64 (str): Base64 encoded input image
-        drawing_type (str): Drawing type
-        params (Dict[str, Any]): Drawing parameters
-    Returns:
-        Dictionary with result image (base64)
-    """
-    try:
-        img = decode_image(image_base64)
-        draw = ImageDraw.Draw(img)
-        color = params.get("color", "red")
-
-        if drawing_type == "rectangle":
-            draw.rectangle(
-                [params["left"], params["top"], params["right"], params["bottom"]],
-                outline=color,
-                width=params.get("width", 2),
-            )
-        elif drawing_type == "circle":
-            x, y, r = params["x"], params["y"], params["radius"]
-            draw.ellipse(
-                (x - r, y - r, x + r, y + r),
-                outline=color,
-                width=params.get("width", 2),
-            )
-        elif drawing_type == "line":
-            draw.line(
-                (
-                    params["start_x"],
-                    params["start_y"],
-                    params["end_x"],
-                    params["end_y"],
-                ),
-                fill=color,
-                width=params.get("width", 2),
-            )
-        elif drawing_type == "text":
-            font_size = params.get("font_size", 20)
-            try:
-                font = ImageFont.truetype("arial.ttf", font_size)
-            except IOError:
-                font = ImageFont.load_default()
-            draw.text(
-                (params["x"], params["y"]),
-                params.get("text", "Text"),
-                fill=color,
-                font=font,
-            )
-        else:
-            return {"error": f"Unknown drawing type: {drawing_type}"}
-
-        result_path = save_image(img)
-        result_base64 = encode_image(result_path)
-        return {"result_image": result_base64}
-
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@tool
-def generate_simple_image(
-    image_type: str,
-    width: int = 500,
-    height: int = 500,
-    params: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """
-    Generate a simple image (gradient, noise, pattern, chart).
-    Args:
-        image_type (str): Type of image
-        width (int), height (int)
-        params (Dict[str, Any], optional): Specific parameters
-    Returns:
-        Dictionary with generated image (base64)
-    """
-    try:
-        params = params or {}
-
-        if image_type == "gradient":
-            direction = params.get("direction", "horizontal")
-            start_color = params.get("start_color", (255, 0, 0))
-            end_color = params.get("end_color", (0, 0, 255))
-
-            img = Image.new("RGB", (width, height))
-            draw = ImageDraw.Draw(img)
-
-            if direction == "horizontal":
-                for x in range(width):
-                    r = int(
-                        start_color[0] + (end_color[0] - start_color[0]) * x / width
-                    )
-                    g = int(
-                        start_color[1] + (end_color[1] - start_color[1]) * x / width
-                    )
-                    b = int(
-                        start_color[2] + (end_color[2] - start_color[2]) * x / width
-                    )
-                    draw.line([(x, 0), (x, height)], fill=(r, g, b))
-            else:
-                for y in range(height):
-                    r = int(
-                        start_color[0] + (end_color[0] - start_color[0]) * y / height
-                    )
-                    g = int(
-                        start_color[1] + (end_color[1] - start_color[1]) * y / height
-                    )
-                    b = int(
-                        start_color[2] + (end_color[2] - start_color[2]) * y / height
-                    )
-                    draw.line([(0, y), (width, y)], fill=(r, g, b))
-
-        elif image_type == "noise":
-            noise_array = np.random.randint(0, 256, (height, width, 3), dtype=np.uint8)
-            img = Image.fromarray(noise_array, "RGB")
-
-        else:
-            return {"error": f"Unsupported image_type {image_type}"}
-
-        result_path = save_image(img)
-        result_base64 = encode_image(result_path)
-        return {"generated_image": result_base64}
-
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@tool
-def combine_images(
-    images_base64: List[str], operation: str, params: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """
-    Combine multiple images (collage, stack, blend).
-    Args:
-        images_base64 (List[str]): List of base64 images
-        operation (str): Combination type
-        params (Dict[str, Any], optional)
-    Returns:
-        Dictionary with combined image (base64)
-    """
-    try:
-        images = [decode_image(b64) for b64 in images_base64]
-        params = params or {}
-
-        if operation == "stack":
-            direction = params.get("direction", "horizontal")
-            if direction == "horizontal":
-                total_width = sum(img.width for img in images)
-                max_height = max(img.height for img in images)
-                new_img = Image.new("RGB", (total_width, max_height))
-                x = 0
-                for img in images:
-                    new_img.paste(img, (x, 0))
-                    x += img.width
-            else:
-                max_width = max(img.width for img in images)
-                total_height = sum(img.height for img in images)
-                new_img = Image.new("RGB", (max_width, total_height))
-                y = 0
-                for img in images:
-                    new_img.paste(img, (0, y))
-                    y += img.height
-        else:
-            return {"error": f"Unsupported combination operation {operation}"}
-
-        result_path = save_image(new_img)
-        result_base64 = encode_image(result_path)
-        return {"combined_image": result_base64}
-
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# Load system prompt - handle both local and Hugging Face deployment
+# Load system prompt from file
 try:
-    # Try local path first
-    with open("system_prompt.txt", "r") as f:
+    with open("Agent\system_prompt.txt", "r") as f:
         system_prompt = f.read()
 except FileNotFoundError:
-    # Fallback to a focused system prompt for file processing
-    system_prompt = """You are a specialized assistant for file processing, data extraction, and database ingestion. Your capabilities include:
-
-1. **File Analysis**: Analyze various file types (PDF, CSV, Excel, JSON, images, text) and extract structured data
-2. **Vision-based Data Extraction**: Use vision models to extract data from images, documents, invoices, forms
-3. **SQL Generation**: Create appropriate CREATE TABLE and INSERT statements for database ingestion
-4. **Data Processing**: Execute Python code for data manipulation and analysis
-
-When processing files:
-- Always start by analyzing the file using the analyze_file tool
-- For images containing documents, extract structured data suitable for database storage
-- Generate appropriate SQL schemas with proper data types
-- Provide clear, actionable results
-
-Format your final response as: FINAL ANSWER: [YOUR ANALYSIS AND SQL STATEMENTS]
-
-Be thorough in your analysis and always provide complete SQL solutions."""
+    raise FileNotFoundError("system_prompt.txt file is required. Please ensure it exists in the current directory.")
 
 sys_msg = SystemMessage(content=system_prompt)
 
-# retriever - handle both local and Hugging Face deployment
+# retriever
 embeddings = OpenAIEmbeddings()
 
-# Try to load vector store, but make it optional for deployment
+# Load vector store
 try:
-    # Try multiple possible paths for vector store
+    
     vector_store_paths = [
         "vector_store",  # Current directory
         "./vector_store",  # Relative path
@@ -752,19 +333,19 @@ def build_graph():
                 example_msg = HumanMessage(
                     content="No similar questions were found in the vector store."
                 )
-                print("ℹ️ No similar questions found")
+                print("No similar questions found")
             else:
                 example_msg = HumanMessage(
                     content=f"Here I provide a similar question and answer for reference: \n\n{similar_question[0].page_content}",
                 )
-                print("✅ Similar question found for reference")
+                print("Similar question found for reference")
             return {"messages": [sys_msg] + state["messages"] + [example_msg]}
         except Exception as e:
-            print(f"❌ Retriever error: {e}")
+            print(f"Retriever error: {e}")
             # Return minimal state if retriever fails
             return {"messages": [sys_msg] + state["messages"]}
 
-    print("🔧 Setting up graph nodes...")
+    print("Setting up graph nodes...")
     builder = StateGraph(MessagesState)
     builder.add_node("retriever", retriever)
     builder.add_node("assistant", assistant)
@@ -778,7 +359,7 @@ def build_graph():
     )
     builder.add_edge("tools", "assistant")
 
-    print("✅ Graph compilation complete")
+    print("Graph compilation complete")
     # Compile graph
     return builder.compile()
 

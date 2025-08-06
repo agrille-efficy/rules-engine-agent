@@ -425,7 +425,7 @@ class StandaloneFileProcessor:
             # Separate statements if needed
             separated = SQLCodeParser.separate_statements(clean_sql)
             
-            return f"Generated SQL for table '{table_name}':\n\n{clean_sql}"
+            return f"{clean_sql}"
         except Exception as e:
             return f"Error: Error generating SQL: {str(e)}"
 

@@ -4,7 +4,6 @@ import requests
 import uuid
 import faiss
 import tempfile
-import pytesseract
 
 import pandas as pd
 import numpy as np
@@ -24,11 +23,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, MessagesState
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_community.tools.riza.command import ExecPython
-from langchain_community.document_loaders import WikipediaLoader, ArxivLoader
 from langchain_community.vectorstores import FAISS
 from langchain.tools.retriever import create_retriever_tool
-from langchain_tavily import TavilySearch
+
+# Import the focused tools for file processing with PDF support
+from tools import tools as file_processing_tools
 
 
 # Load environment variables - works both locally and on Hugging Face spaces
@@ -38,35 +37,35 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable is required")
 
-# Diffusion model for image processing
+# Vision model for image processing
 vision_llm = ChatOpenAI(temperature=0) 
 
-@tool
-def web_search(query: str) -> str:
-    """Search Tavily for a query and return summarized results."""
-    try:
-        # Perform the search using TavilySearch
-        search_tool = TavilySearch(max_results=3)
-        search_docs = search_tool.invoke(query)
+# @tool
+# def web_search(query: str) -> str:
+#     """Search Tavily for a query and return summarized results."""
+#     try:
+#         # Perform the search using TavilySearch
+#         search_tool = TavilySearch(max_results=3)
+#         search_docs = search_tool.invoke(query)
         
-        # Handle different response formats
-        if isinstance(search_docs, list):
-            # Format the results into a readable string
-            formatted_search_docs = "\n\n---\n\n".join(
-                [
-                    f"Source: {doc.get('url', 'Unknown')}\n"
-                    f"Title: {doc.get('title', 'N/A')}\n"
-                    f"Content: {doc.get('content', '')[:500]}..."  # Limit content to 500 characters
-                    for doc in search_docs
-                ]
-            )
-        else:
-            # If it's a string response, return as is
-            formatted_search_docs = str(search_docs)
+#         # Handle different response formats
+#         if isinstance(search_docs, list):
+#             # Format the results into a readable string
+#             formatted_search_docs = "\n\n---\n\n".join(
+#                 [
+#                     f"Source: {doc.get('url', 'Unknown')}\n"
+#                     f"Title: {doc.get('title', 'N/A')}\n"
+#                     f"Content: {doc.get('content', '')[:500]}..."  # Limit content to 500 characters
+#                     for doc in search_docs
+#                 ]
+#             )
+#         else:
+#             # If it's a string response, return as is
+#             formatted_search_docs = str(search_docs)
         
-        return formatted_search_docs
-    except Exception as e:
-        return f"Error during web search: {str(e)}"
+#         return formatted_search_docs
+#     except Exception as e:
+#         return f"Error during web search: {str(e)}"
 
 
 @tool
@@ -181,23 +180,6 @@ def exponent(a: int, b: int) -> int:
     """
     return a ** b
 
-## Uses riza command to execute python code snippets, not working well
-
-# @tool
-# def python_code_executor(code: str) -> str:
-#     """ Executes a Python code snippet and returns the results
-    
-#     Args:
-#         code: str, the Python code to execute
-#     """
-#     try:
-#         exec_python = ExecPython()
-#         result = exec_python.run(code)
-#         return result
-#     except Exception as e:
-#         return f"Error executing code: {str(e)}"
-    
-
 @tool 
 def code_executor(code: str, language : str = "python") -> str: 
     """
@@ -220,35 +202,39 @@ def code_executor(code: str, language : str = "python") -> str:
         return f"Error executing code: {str(e)}"
 
 
-@tool
-def wiki_search(query: str) -> str:
-    """Search Wikipedia for a query and return summarized results."""
-    try:
-        search_docs = WikipediaLoader(query=query, load_max_docs=3).load()
-        summarized_results = []
-        for doc in search_docs:
-            content = doc.page_content
-            # Summarize or extract key sections
-            summarized_results.append(content[:500])  # First 500 characters as a fallback
+# @tool
+# def wiki_search(query: str) -> str:
+#     """Search Wikipedia for a query and return summarized results."""
+#     try:
+#         search_docs = WikipediaLoader(query=query, load_max_docs=3).load()
+#         summarized_results = []
+#         for doc in search_docs:
+#             content = doc.page_content
+#             # Summarize or extract key sections
+#             summarized_results.append(content[:500])  
 
-        return "\n\n---\n\n".join(summarized_results)
-    except Exception as e:
-        return f"Error during Wikipedia search: {str(e)}"
+#         return "\n\n---\n\n".join(summarized_results)
+#     except Exception as e:
+#         return f"Error during Wikipedia search: {str(e)}"
     
 
-@tool
-def arxiv_search(query: str) -> str:
-    """Search Arxiv for a query and return maximum 3 result.
-    Args:
-        query: The search query."""
-    search_docs = ArxivLoader(query=query, load_max_docs=3).load()
-    formatted_search_docs = "\n\n---\n\n".join(
-        [
-            f'<Document source="{doc.metadata["source"]}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content[:1000]}\n</Document>'
-            for doc in search_docs
-        ]
-    )
-    return {"arxiv_results": formatted_search_docs}
+# @tool
+# def arxiv_search(query: str) -> str:
+#     """Search Arxiv for a query and return maximum 3 result.
+#     Args:
+#         query: The search query."""
+#     try:
+#         search_docs = ArxivLoader(query=query, load_max_docs=3).load()
+#         formatted_search_docs = "\n\n---\n\n".join(
+#             [
+#                 f'<Document source="{doc.metadata["source"]}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content[:1000]}\n</Document>'
+#                 for doc in search_docs
+#             ]
+#         )
+#         return formatted_search_docs
+#     except Exception as e:
+#         return f"Error during Arxiv search: {str(e)}"
+
 
 @tool
 def save_and_read_file(content: str, filename: Optional[str] = None) -> str:
@@ -303,25 +289,6 @@ def download_file_from_url(url: str, filename: Optional[str] = None) -> str:
         return f"File downloaded to {filepath}. You can read this file to process its contents."
     except Exception as e:
         return f"Error downloading file: {str(e)}"
-
-
-# @tool
-# def extract_text_from_image(image_path: str) -> str:
-#     """
-#     Extract text from an image using OCR library pytesseract (if available).
-#     Args:
-#         image_path (str): the path to the image file.
-#     """
-#     try:
-#         # Open the image
-#         image = Image.open(image_path)
-
-#         # Extract text from the image
-#         text = pytesseract.image_to_string(image)
-
-#         return f"Extracted text from image:\n\n{text}"
-#     except Exception as e:
-#         return f"Error extracting text from image: {str(e)}"
 
 @tool
 def extract_structured_data_from_image(image_path: str) -> str:
@@ -701,16 +668,23 @@ try:
     with open("system_prompt.txt", "r") as f:
         system_prompt = f.read()
 except FileNotFoundError:
-    # Fallback to a basic system prompt if file not found
-    system_prompt = """You are a helpful assistant with access to multiple tools. When answering questions:
-1. Use tools iteratively to gather information.
-2. Combine results from multiple tools if needed to provide a complete answer.
-3. If one tool doesn't provide enough information, try another relevant tool.
-4. Always provide a concise and accurate response in the format: FINAL ANSWER: [YOUR FINAL ANSWER].
+    # Fallback to a focused system prompt for file processing
+    system_prompt = """You are a specialized assistant for file processing, data extraction, and database ingestion. Your capabilities include:
 
-Be resourceful and thorough in your investigation. 
-Only return the FINAL ANSWER. 
-No yapping nor any explanation, just the result of the FINAL ANSWER."""
+1. **File Analysis**: Analyze various file types (PDF, CSV, Excel, JSON, images, text) and extract structured data
+2. **Vision-based Data Extraction**: Use vision models to extract data from images, documents, invoices, forms
+3. **SQL Generation**: Create appropriate CREATE TABLE and INSERT statements for database ingestion
+4. **Data Processing**: Execute Python code for data manipulation and analysis
+
+When processing files:
+- Always start by analyzing the file using the analyze_file tool
+- For images containing documents, extract structured data suitable for database storage
+- Generate appropriate SQL schemas with proper data types
+- Provide clear, actionable results
+
+Format your final response as: FINAL ANSWER: [YOUR ANALYSIS AND SQL STATEMENTS]
+
+Be thorough in your analysis and always provide complete SQL solutions."""
 
 sys_msg = SystemMessage(content=system_prompt)
 
@@ -753,38 +727,8 @@ create_retriever_tool = create_retriever_tool(
     description="A tool to retrieve similar questions from a vector store."
 )
 
-tools = [
-    # Web and Knowledge Tools
-    web_search,
-    wiki_search,
-    arxiv_search,
-    
-    # Image Processing Tools
-    image_describer,
-    extract_structured_data_from_image,
-    analyze_image,
-    transform_image,
-    draw_on_image,
-    generate_simple_image,
-    combine_images,
-    
-    # Math Operations
-    add,
-    subtract,
-    multiply,
-    divide,
-    modulus,
-    exponent,
-    
-    # File Handling Tools
-    save_and_read_file,
-    download_file_from_url,
-    analyze_csv_file,
-    analyze_excel_file,
-    
-    # Code Execution
-    code_executor
-]
+# Focused tools for file processing, vision analysis, and database ingestion
+tools = file_processing_tools + [create_retriever_tool]
 
 
 def build_graph():

@@ -17,9 +17,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # PDF processing imports
 try:
-    import PyPDF2
     import pdfplumber
-    import fitz  # PyMuPDF
     PDF_AVAILABLE = True
 except ImportError:
     PDF_AVAILABLE = False
@@ -43,15 +41,13 @@ class SQLCodeParser:
             sql_blocks = re.findall(r'```sql\s*(.*?)\s*```', response_text, re.DOTALL | re.IGNORECASE)
             
             if sql_blocks:
-                # Join all SQL blocks found
                 sql_code = '\n\n'.join(sql_blocks)
             else:
-                #Extract from ``` code blocks (without language specification)
+                #Extract from ``` code blocks
                 code_blocks = re.findall(r'```\s*(.*?)\s*```', response_text, re.DOTALL)
                 sql_code = '\n\n'.join(code_blocks) if code_blocks else response_text
             
 
-            # Clean up the extracted SQL
             cleaned_sql = SQLCodeParser._clean_sql_code(sql_code)
             
             return cleaned_sql
@@ -70,9 +66,9 @@ class SQLCodeParser:
         Returns:
             Cleaned and formatted SQL code
         """
-        # Remove common markdown artifacts
-        sql_code = re.sub(r'^```sql\s*', '', sql_code, flags=re.MULTILINE | re.IGNORECASE)
-        sql_code = re.sub(r'^```\s*$', '', sql_code, flags=re.MULTILINE)
+        # # Remove common markdown artifacts
+        # sql_code = re.sub(r'^```sql\s*', '', sql_code, flags=re.MULTILINE | re.IGNORECASE)
+        # sql_code = re.sub(r'^```\s*$', '', sql_code, flags=re.MULTILINE)
         
         # Remove comment lines that are not SQL comments
         lines = sql_code.split('\n')
@@ -84,12 +80,11 @@ class SQLCodeParser:
             if not stripped and not cleaned_lines:
                 continue
                 
-            # Always keep SQL comments
+            # keep SQL comments
             if stripped.startswith('--') or stripped.startswith('/*') or '*/' in stripped:
                 cleaned_lines.append(line)
                 continue
 
-            # Skip empty lines
             if not stripped:
                 continue
                 
@@ -115,7 +110,6 @@ class SQLCodeParser:
 
         result = '\n'.join(cleaned_lines)
         
-        # Remove excessive blank lines
         result = re.sub(r'\n\s*\n\s*\n', '\n\n', result)
         result = result.strip()
         
@@ -133,7 +127,6 @@ class SQLCodeParser:
             Dictionary with 'create_table' and 'insert_statements' keys
         """
         try:
-            # Split by semicolon but be careful with semicolons in strings
             statements = []
             current_statement = ""
             in_string = False
@@ -154,7 +147,6 @@ class SQLCodeParser:
                 
                 current_statement += char
             
-            # Add the last statement if it doesn't end with semicolon
             if current_statement.strip():
                 statements.append(current_statement.strip())
             
@@ -261,7 +253,7 @@ class StandaloneFileProcessor:
             df = pd.read_csv(file_path)
             results = []
             results.append(f"CSV Analysis for: {os.path.basename(file_path)}")
-            results.append(f"Dimensions: {df.shape[0]} rows × {df.shape[1]} columns")
+            results.append(f"Dimensions: {df.shape[0]} rows x {df.shape[1]} columns")
             results.append(f"Columns: {list(df.columns)}")
             
             results.append("\nData Types Analysis:")
@@ -306,7 +298,7 @@ class StandaloneFileProcessor:
             if sheet_names:
                 df = pd.read_excel(file_path, sheet_name=sheet_names[0])
                 results.append(f"\n--- Sheet: {sheet_names[0]} ---")
-                results.append(f"Dimensions: {df.shape[0]} rows × {df.shape[1]} columns")
+                results.append(f"Dimensions: {df.shape[0]} rows x {df.shape[1]} columns")
                 results.append(f"Columns: {list(df.columns)}")
                 
                 results.append(f"\nSample Data:")
@@ -422,7 +414,7 @@ class StandaloneFileProcessor:
             # Parse the SQL code from the response
             clean_sql = SQLCodeParser.extract_sql_code(response.content)
             
-            # Separate statements if needed
+            # Separate statements if needed (useful to create a FIFO queue to process them automatically with an agent)
             separated = SQLCodeParser.separate_statements(clean_sql)
             
             return f"{clean_sql}"
@@ -430,7 +422,6 @@ class StandaloneFileProcessor:
             return f"Error: Error generating SQL: {str(e)}"
 
 
-# Global processor instance
 processor = None
 
 def initialize_processor():
@@ -450,7 +441,6 @@ def process_file_upload(file, table_name: Optional[str] = None) -> Tuple[str, st
         return "No file uploaded.", ""
     
     try:
-        # Get file path from Gradio file object
         if hasattr(file, 'name'):
             file_path = file.name
         else:
@@ -459,7 +449,6 @@ def process_file_upload(file, table_name: Optional[str] = None) -> Tuple[str, st
         if not os.path.exists(file_path):
             return f"File not found: {file_path}", ""
         
-        # Initialize processor if needed
         if processor is None:
             init_result = initialize_processor()
             if "Error" in init_result:
@@ -563,24 +552,24 @@ def create_gradio_interface():
             outputs=[analysis_output, sql_output]
         )
         
-        gr.Markdown("---")
+        # gr.Markdown("---")
         
-        with gr.Accordion("Help & Examples", open=False):
-            gr.Markdown("""
-            ### Supported File Types:
-            - **PDF**: Text extraction with OCR fallback
-            - **CSV/Excel**: Data analysis and SQL table generation  
-            - **Images**: Document OCR and structured data extraction
-            - **JSON**: Structure analysis and schema generation
-            - **Text/XML**: Content analysis
+        # with gr.Accordion("Help & Examples", open=False):
+        #     gr.Markdown("""
+        #     ### Supported File Types:
+        #     - **PDF**: Text extraction with OCR fallback
+        #     - **CSV/Excel**: Data analysis and SQL table generation  
+        #     - **Images**: Document OCR and structured data extraction
+        #     - **JSON**: Structure analysis and schema generation
+        #     - **Text/XML**: Content analysis
             
-            ### Features:
-            - Automatic data type inference
-            - SQL CREATE TABLE generation
-            - Sample INSERT statements
-            - Column analysis and statistics
-            - Image-based document processing
-            """)
+        #     ### Features:
+        #     - Automatic data type inference
+        #     - SQL CREATE TABLE generation
+        #     - Sample INSERT statements
+        #     - Column analysis and statistics
+        #     - Image-based document processing
+        #     """)
     
     return interface
 
@@ -658,7 +647,7 @@ def main():
             print(f"Error launching Gradio interface: {e}")
             print("Trying fallback configuration...")
             
-            # Fallback: simpler launch configuration
+            # Fallback
             try:
                 interface = create_gradio_interface()
                 interface.launch(share=True, debug=False)

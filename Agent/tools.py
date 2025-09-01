@@ -8,8 +8,8 @@ from langchain_openai import ChatOpenAI
 
 from dotenv import load_dotenv
 
-# Import SQLCodeParser from app.py
-from app import SQLCodeParser
+# Import SQLCodeParser from utils.py to avoid circular import
+from utils import SQLCodeParser
 
 # PDF processing imports
 try:
@@ -269,7 +269,7 @@ def _analyze_image(file_path: str) -> str:
             )
         ]
         
-        response = vision_llm(message)
+        response = vision_llm.invoke(message)
         return f"Image Analysis for: {os.path.basename(file_path)}\n\n{response.content}"
     
     except Exception as e:
@@ -295,7 +295,7 @@ def _extract_text_from_image_base64(image_base64: str) -> str:
             )
         ]
         
-        response = vision_llm(message)
+        response = vision_llm.invoke(message)
         return response.content
     except:
         return ""
@@ -344,7 +344,7 @@ Requirements:
 
 IMPORTANT: Return ONLY the SQL code. No explanations, no markdown formatting, no code blocks. Start directly with CREATE TABLE and end with the last INSERT statement."""
         
-        response = vision_llm([HumanMessage(content=prompt)])
+        response = vision_llm.invoke([HumanMessage(content=prompt)])
         
         # Use the robust SQLCodeParser to clean the response
         clean_sql = SQLCodeParser.extract_sql_code(response.content)

@@ -24,3 +24,4 @@ Thumbs.db
 
 # In devlopment for PoC
 RAG_sandbox
+Agent/RAG/vector_store/

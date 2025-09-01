@@ -19,16 +19,14 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, MessagesState
+from langgraph.checkpoint.memory import InMemorySaver
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.tools.retriever import create_retriever_tool
 
-# Import the focused tools for file processing with PDF support
 from tools import tools as file_processing_tools
 
-
-# Load environment variables - works both locally and on Hugging Face spaces
 load_dotenv(r'C:\Users\axel.grille\Documents\rules-engine-agent\Agent\.env')
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -86,9 +84,6 @@ def image_describer(image_url: str) -> str:
         return "Error reading image file."
 
 
-
-
-
 @tool 
 def code_executor(code: str, language : str = "python") -> str: 
     """
@@ -109,8 +104,6 @@ def code_executor(code: str, language : str = "python") -> str:
         return result
     except Exception as e:
         return f"Error executing code: {str(e)}"
-
-
 
 @tool
 def save_and_read_file(content: str, filename: Optional[str] = None) -> str:
@@ -167,7 +160,7 @@ def download_file_from_url(url: str, filename: Optional[str] = None) -> str:
         return f"Error downloading file: {str(e)}"
 
 @tool
-def extract_structured_data_from_image(image_path: str) -> str:
+def extract_structured_data_from_image(image_path: str, schema_context: str) -> str:
     """
     Classify the document and extract structured data from an image using a vision model. 
     Args:
@@ -180,23 +173,39 @@ def extract_structured_data_from_image(image_path: str) -> str:
         loaded_img = load_local_image(image_path)
         base64_image = encode_image(loaded_img)
 
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        response = client.response.create(
-            model=vision_llm.model.name,
+        extraction_prompt = f""" 
+        Analyze this docuement image and extract the structured data.
 
-            input=[ 
-            {
-                "role" : "user",
-                "content" : [ 
-                    {"type": "input_text", "text": "Read the following document, identify which kind of document it is and organize the data into structured data."},
-                    {
-                        "type": "input_image",
-                        "image_url": f"data:image/png;base64,{base64_image}",
-                    }
+        {f"Use this database schema as a guide: {schema_context}" if schema_context else ""}
+
+        Instructions:
+        1. Identify the document type (invoice, form, receipt, etc.)
+        2. Extract all relevant data fields 
+        3. Return the data in JSON format with clear field names
+        4. If the docuement contains tables, extract each row 
+        5. Ensure data types are appropriate (dates, numbers, text)
+
+        Return only valid JSON format.
+        """
+
+        message=[
+            HumanMessage(
+                content=[ 
+                {
+                    "role" : "user",
+                    "content" : [ 
+                        {"type": "input_text", "text": extraction_prompt},
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/png;base64,{base64_image}",
+                        }
+                    ],
+                },
                 ],
-            },
-            ],
-        )
+            )
+            
+        ]
+        response = vision_llm.invoke(message)
         return response.output_text
     
     except Exception as e:
@@ -272,27 +281,72 @@ embeddings = OpenAIEmbeddings()
 
 # Load vector store
 try:
-    
-    vector_store_paths = [
-        "vector_store",  # Current directory
-        "./vector_store",  # Relative path
-        r"C:\Projects\RAG_PoC\agents_course_hf\Final_Assignment_Template\vector_store"  # Original local path
-    ]
-    
+    rag_dir = "./Agent/RAG/"
     vector_store = None
-    for path in vector_store_paths:
+    vector_store_found = False
+
+    if not os.path.exists(rag_dir):
+        print(f"Directory {rag_dir} does not exist.")
+    else:
+        print(f"Directory {rag_dir} exists.")
+
         try:
-            vector_store = FAISS.load_local(path, embeddings, allow_dangerous_deserialization=True)
-            print(f"Vector store loaded from: {path}")
-            break
-        except:
-            continue
-    
-    if vector_store is None:
-        print("Warning: Vector store not found. Creating empty vector store.")
-        # Create a minimal vector store with dummy data
-        index = faiss.IndexFlatL2(len(embeddings.embed_query("hello world")))
-        vector_store = FAISS(embeddings, index, {}, {})
+            files = os.listdir(rag_dir)
+            if not files:
+                print(f"No files found in directory {rag_dir}")
+            else:
+                vector_store_files = [f for f in files if "vector_store" in f and not f.endswith(".pkl")]
+                
+                if vector_store_files:
+                    vector_store_file = vector_store_files[0]
+                    vector_store_path = os.path.join(rag_dir, vector_store_file)
+                    print(f"Vector store found: {vector_store_file}") 
+
+                    try:
+                        vector_store = FAISS.load_local(
+                            vector_store_path,
+                            embeddings,
+                            allow_dangerous_deserialization=True
+                        )
+                        print(f"Vector store loaded from: {vector_store_path}")
+                        vector_store_found = True 
+                    except Exception as load_error:
+                        print(f"Error loading vector store: {load_error}")
+                        vector_store = None 
+                else: 
+                    print("No vector store file found in directory")
+
+
+        except PermissionError:
+            print(f"Permission denied when accessing directory {rag_dir}")
+        except Exception as e:
+            print(f"Error accessing directory {rag_dir}: {e}")
+           
+
+    if not vector_store_found or vector_store is None:
+        print("Warning: Vector store not found or failed to load. Creating empty vector store.")
+        try:
+            # Create a minimal vector store with proper parameters
+            embeddings_dim = len(embeddings.embed_query("hello world"))
+            index = faiss.IndexFlatL2(embeddings_dim)
+            
+            vector_store = FAISS(
+                embedding_function=embeddings,
+                index=index,
+                docstore={},
+                index_to_docstore_id={}
+            )
+        except Exception as fallback_error:
+            print(f"Error creating fallback vector store: {fallback_error}")
+            from langchain_community.docstore.in_memory import InMemoryDocstore
+            embeddings_dim = 1536  
+            index = faiss.IndexFlatL2(embeddings_dim)
+            vector_store = FAISS(
+                embedding_function=embeddings,
+                index=index,
+                docstore=InMemoryDocstore({}),
+                index_to_docstore_id={}
+            )
 
 except Exception as e:
     print(f"Warning: Could not load vector store: {e}")
@@ -325,7 +379,7 @@ def build_graph():
         try:
             similar_question = vector_store.similarity_search(
             query=state["messages"][0].content,
-            k=1
+            k=5
             )
             if not similar_question:
                 example_msg = HumanMessage(
@@ -344,6 +398,8 @@ def build_graph():
             return {"messages": [sys_msg] + state["messages"]}
 
     print("Setting up graph nodes...")
+    checkpointer = InMemorySaver() # Simple in-memory checkpointer for short-term memory
+
     builder = StateGraph(MessagesState)
     builder.add_node("retriever", retriever)
     builder.add_node("assistant", assistant)
@@ -359,7 +415,9 @@ def build_graph():
 
     print("Graph compilation complete")
     # Compile graph
-    return builder.compile()
+    graph =  builder.compile(checkpointer=checkpointer)
+    
+    return graph
 
 if __name__ == "__main__":
     question = "How many studio albums were published by Mercedes Sosa between 2000 and 2009 (included)? " \
@@ -368,12 +426,8 @@ if __name__ == "__main__":
     # Build the graph
     graph = build_graph()
     # Run the graph
-    
+
     messages = [HumanMessage(content=question)]
     messages = graph.invoke({"messages": messages})
     for m in messages["messages"]:
         m.pretty_print()
-
-
-## TODO: ADD MEMORY TO THE AGENT
-

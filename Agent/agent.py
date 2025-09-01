@@ -6,13 +6,11 @@ import faiss
 import tempfile
 
 import pandas as pd
-import numpy as np
 
-from typing import Optional, Dict, Any, List 
+from typing import Optional
 from dotenv import load_dotenv
 from urllib.parse import urlparse 
 from image_processing import *
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
 from code_interpreter import CodeInterpreter
 from openai import OpenAI
 

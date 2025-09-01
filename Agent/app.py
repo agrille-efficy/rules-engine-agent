@@ -1,7 +1,6 @@
 import os
 import sys
 import gradio as gr
-import tempfile
 import pandas as pd
 import json
 import base64
@@ -65,10 +64,7 @@ class SQLCodeParser:
             
         Returns:
             Cleaned and formatted SQL code
-        """
-        # # Remove common markdown artifacts
-        # sql_code = re.sub(r'^```sql\s*', '', sql_code, flags=re.MULTILINE | re.IGNORECASE)
-        # sql_code = re.sub(r'^```\s*$', '', sql_code, flags=re.MULTILINE)
+        """        
         
         # Remove comment lines that are not SQL comments
         lines = sql_code.split('\n')
@@ -551,26 +547,7 @@ def create_gradio_interface():
             inputs=[file_input, table_name_input],
             outputs=[analysis_output, sql_output]
         )
-        
-        # gr.Markdown("---")
-        
-        # with gr.Accordion("Help & Examples", open=False):
-        #     gr.Markdown("""
-        #     ### Supported File Types:
-        #     - **PDF**: Text extraction with OCR fallback
-        #     - **CSV/Excel**: Data analysis and SQL table generation  
-        #     - **Images**: Document OCR and structured data extraction
-        #     - **JSON**: Structure analysis and schema generation
-        #     - **Text/XML**: Content analysis
-            
-        #     ### Features:
-        #     - Automatic data type inference
-        #     - SQL CREATE TABLE generation
-        #     - Sample INSERT statements
-        #     - Column analysis and statistics
-        #     - Image-based document processing
-        #     """)
-    
+          
     return interface
 
 
@@ -640,7 +617,7 @@ def main():
                 server_name="127.0.0.1",
                 server_port=7860,
                 share=True,
-                show_error=False,  # Disable error display to avoid schema issues
+                show_error=False,
                 debug=False
             )
         except Exception as e:

@@ -21,3 +21,6 @@ Agent/.gradio/
 # OS files
 .DS_Store
 Thumbs.db
+
+# In devlopment for PoC
+RAG_sandbox

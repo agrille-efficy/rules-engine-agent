@@ -2,12 +2,10 @@ import os
 import pandas as pd
 import json
 import base64
-from typing import Dict, Any, Optional
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
-from PIL import Image
-import pytesseract
+
 from dotenv import load_dotenv
 
 # Import SQLCodeParser from app.py
@@ -17,7 +15,7 @@ from app import SQLCodeParser
 try:
     import PyPDF2
     import pdfplumber
-    import fitz  # PyMuPDF
+    import fitz  
     PDF_AVAILABLE = True
 except ImportError:
     PDF_AVAILABLE = False
@@ -135,7 +133,7 @@ def _analyze_csv(file_path: str) -> str:
         
         results = []
         results.append(f"CSV Analysis for: {os.path.basename(file_path)}")
-        results.append(f"Dimensions: {df.shape[0]} rows × {df.shape[1]} columns")
+        results.append(f"Dimensions: {df.shape[0]} rows, {df.shape[1]} columns")
         results.append(f"Columns: {list(df.columns)}")
         
         # Data types analysis

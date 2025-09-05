@@ -10,9 +10,6 @@ __pycache__/
 .venv/
 venv/
 
-# Jupyter notebooks (if you don't want to track them)
-Agent/test.ipynb
-*.ipynb
 
 # Gradio files
 .gradio/
@@ -23,6 +20,6 @@ Agent/.gradio/
 Thumbs.db
 
 # In devlopment for PoC
-RAG_sandbox
 Agent/RAG/vector_store/
 aa.json
+Agent/test.ipynb

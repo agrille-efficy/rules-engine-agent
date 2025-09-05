@@ -20,6 +20,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, MessagesState
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.store.memory import InMemoryStore
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -276,92 +277,92 @@ except FileNotFoundError:
 
 sys_msg = SystemMessage(content=system_prompt)
 
-# retriever
-embeddings = OpenAIEmbeddings()
+# # retriever
+# embeddings = OpenAIEmbeddings()
 
-# Load vector store
-try:
-    rag_dir = "./Agent/RAG/"
-    vector_store = None
-    vector_store_found = False
+# # Load vector store
+# try:
+#     rag_dir = "./Agent/RAG/"
+#     vector_store = None
+#     vector_store_found = False
 
-    if not os.path.exists(rag_dir):
-        print(f"Directory {rag_dir} does not exist.")
-    else:
-        print(f"Directory {rag_dir} exists.")
+#     if not os.path.exists(rag_dir):
+#         print(f"Directory {rag_dir} does not exist.")
+#     else:
+#         print(f"Directory {rag_dir} exists.")
 
-        try:
-            files = os.listdir(rag_dir)
-            if not files:
-                print(f"No files found in directory {rag_dir}")
-            else:
-                vector_store_files = [f for f in files if "vector_store" in f and not f.endswith(".pkl")]
+#         try:
+#             files = os.listdir(rag_dir)
+#             if not files:
+#                 print(f"No files found in directory {rag_dir}")
+#             else:
+#                 vector_store_files = [f for f in files if "vector_store" in f and not f.endswith(".pkl")]
                 
-                if vector_store_files:
-                    vector_store_file = vector_store_files[0]
-                    vector_store_path = os.path.join(rag_dir, vector_store_file)
-                    print(f"Vector store found: {vector_store_file}") 
+#                 if vector_store_files:
+#                     vector_store_file = vector_store_files[0]
+#                     vector_store_path = os.path.join(rag_dir, vector_store_file)
+#                     print(f"Vector store found: {vector_store_file}") 
 
-                    try:
-                        vector_store = FAISS.load_local(
-                            vector_store_path,
-                            embeddings,
-                            allow_dangerous_deserialization=True
-                        )
-                        print(f"Vector store loaded from: {vector_store_path}")
-                        vector_store_found = True 
-                    except Exception as load_error:
-                        print(f"Error loading vector store: {load_error}")
-                        vector_store = None 
-                else: 
-                    print("No vector store file found in directory")
+#                     try:
+#                         vector_store = FAISS.load_local(
+#                             vector_store_path,
+#                             embeddings,
+#                             allow_dangerous_deserialization=True
+#                         )
+#                         print(f"Vector store loaded from: {vector_store_path}")
+#                         vector_store_found = True 
+#                     except Exception as load_error:
+#                         print(f"Error loading vector store: {load_error}")
+#                         vector_store = None 
+#                 else: 
+#                     print("No vector store file found in directory")
 
 
-        except PermissionError:
-            print(f"Permission denied when accessing directory {rag_dir}")
-        except Exception as e:
-            print(f"Error accessing directory {rag_dir}: {e}")
+#         except PermissionError:
+#             print(f"Permission denied when accessing directory {rag_dir}")
+#         except Exception as e:
+#             print(f"Error accessing directory {rag_dir}: {e}")
            
 
-    if not vector_store_found or vector_store is None:
-        print("Warning: Vector store not found or failed to load. Creating empty vector store.")
-        try:
-            # Create a minimal vector store with proper parameters
-            embeddings_dim = len(embeddings.embed_query("hello world"))
-            index = faiss.IndexFlatL2(embeddings_dim)
+#     if not vector_store_found or vector_store is None:
+#         print("Warning: Vector store not found or failed to load. Creating empty vector store.")
+#         try:
+#             # Create a minimal vector store with proper parameters
+#             embeddings_dim = len(embeddings.embed_query("hello world"))
+#             index = faiss.IndexFlatL2(embeddings_dim)
             
-            vector_store = FAISS(
-                embedding_function=embeddings,
-                index=index,
-                docstore={},
-                index_to_docstore_id={}
-            )
-        except Exception as fallback_error:
-            print(f"Error creating fallback vector store: {fallback_error}")
-            from langchain_community.docstore.in_memory import InMemoryDocstore
-            embeddings_dim = 1536  
-            index = faiss.IndexFlatL2(embeddings_dim)
-            vector_store = FAISS(
-                embedding_function=embeddings,
-                index=index,
-                docstore=InMemoryDocstore({}),
-                index_to_docstore_id={}
-            )
+#             vector_store = FAISS(
+#                 embedding_function=embeddings,
+#                 index=index,
+#                 docstore={},
+#                 index_to_docstore_id={}
+#             )
+#         except Exception as fallback_error:
+#             print(f"Error creating fallback vector store: {fallback_error}")
+#             from langchain_community.docstore.in_memory import InMemoryDocstore
+#             embeddings_dim = 1536  
+#             index = faiss.IndexFlatL2(embeddings_dim)
+#             vector_store = FAISS(
+#                 embedding_function=embeddings,
+#                 index=index,
+#                 docstore=InMemoryDocstore({}),
+#                 index_to_docstore_id={}
+#             )
 
-except Exception as e:
-    print(f"Warning: Could not load vector store: {e}")
-    # Create a minimal vector store with dummy data
-    index = faiss.IndexFlatL2(len(embeddings.embed_query("hello world")))
-    vector_store = FAISS(embeddings, index, {}, {})
+# except Exception as e:
+#     print(f"Warning: Could not load vector store: {e}")
+#     # Create a minimal vector store with dummy data
+#     index = faiss.IndexFlatL2(len(embeddings.embed_query("hello world")))
+#     vector_store = FAISS(embeddings, index, {}, {})
 
-create_retriever_tool = create_retriever_tool(
-    retriever=vector_store.as_retriever(),
-    name="Question_search", 
-    description="A tool to retrieve similar questions from a vector store."
-)
+# create_retriever_tool = create_retriever_tool(
+#     retriever=vector_store.as_retriever(),
+#     name="Question_search", 
+#     description="A tool to retrieve similar questions from a vector store."
+# )
 
 # Focused tools for file processing, vision analysis, and database ingestion
-tools = file_processing_tools + [create_retriever_tool]
+tools = file_processing_tools # + [create_retriever_tool]
 
 
 def build_graph():
@@ -374,39 +375,42 @@ def build_graph():
             "messages": [chat_with_tools.invoke(state["messages"])]
         }
     
-    def retriever(state: MessagesState):
-        """Retriever node"""
-        try:
-            similar_question = vector_store.similarity_search(
-            query=state["messages"][0].content,
-            k=5
-            )
-            if not similar_question:
-                example_msg = HumanMessage(
-                    content="No similar questions were found in the vector store."
-                )
-                print("No similar questions found")
-            else:
-                example_msg = HumanMessage(
-                    content=f"Here I provide a similar question and answer for reference: \n\n{similar_question[0].page_content}",
-                )
-                print("Similar question found for reference")
-            return {"messages": [sys_msg] + state["messages"] + [example_msg]}
-        except Exception as e:
-            print(f"Retriever error: {e}")
-            # Return minimal state if retriever fails
-            return {"messages": [sys_msg] + state["messages"]}
+    # def retriever(state: MessagesState):
+    #     """Retriever node"""
+    #     try:
+    #         similar_question = vector_store.similarity_search(
+    #         query=state["messages"][0].content,
+    #         k=5
+    #         )
+    #         if not similar_question:
+    #             example_msg = HumanMessage(
+    #                 content="No similar questions were found in the vector store."
+    #             )
+    #             print("No similar questions found")
+    #         else:
+    #             example_msg = HumanMessage(
+    #                 content=f"Here I provide a similar question and answer for reference: \n\n{similar_question[0].page_content}",
+    #             )
+    #             print("Similar question found for reference")
+    #         return {"messages": [sys_msg] + state["messages"] + [example_msg]}
+    #     except Exception as e:
+    #         print(f"Retriever error: {e}")
+    #         # Return minimal state if retriever fails
+    #         return {"messages": [sys_msg] + state["messages"]}
 
     print("Setting up graph nodes...")
-    checkpointer = InMemorySaver() # Simple in-memory checkpointer for short-term memory
+
+    # checkpointer = InMemorySaver() # Simple in-memory checkpointer for short-term memory
+    # store = InMemoryStore() # In-memory store for long-term memory
 
     builder = StateGraph(MessagesState)
-    builder.add_node("retriever", retriever)
+    # builder.add_node("retriever", retriever)
     builder.add_node("assistant", assistant)
     builder.add_node("tools", ToolNode(tools))
 
-    builder.add_edge(START, "retriever")
-    builder.add_edge("retriever", "assistant")
+    # builder.add_edge(START, "retriever")
+    # builder.add_edge("retriever", "assistant")
+    builder.add_edge(START, "assistant")
     builder.add_conditional_edges(
         "assistant",
         tools_condition,
@@ -415,18 +419,16 @@ def build_graph():
 
     print("Graph compilation complete")
     # Compile graph
-    graph =  builder.compile(checkpointer=checkpointer)
+    # graph =  builder.compile(checkpointer=checkpointer, store = store)
     
-    return graph
+    return builder.compile()
 
 if __name__ == "__main__":
-    question = "How many studio albums were published by Mercedes Sosa between 2000 and 2009 (included)? " \
-    "You can use the latest 2022 version of english wikipedia."
-
+    question = open("system_prompt.txt", "r").read()
     # Build the graph
     graph = build_graph()
-    # Run the graph
 
+    # Run the graph
     messages = [HumanMessage(content=question)]
     messages = graph.invoke({"messages": messages})
     for m in messages["messages"]:

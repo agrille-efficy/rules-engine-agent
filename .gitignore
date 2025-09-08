@@ -23,3 +23,5 @@ Thumbs.db
 Agent/RAG/vector_store/
 aa.json
 Agent/test.ipynb
+Agent/Agent/RAG/vector_store/index.faiss
+Agent/Agent/RAG/vector_store/index.pkl

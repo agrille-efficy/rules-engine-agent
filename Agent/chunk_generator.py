@@ -16,11 +16,13 @@ STATUS_KEYS = ["status", "state"]
 class TableIngestionChunkBuilder:
     def __init__(self, dico_data: Dict[str, Any], enable_llm_summary: bool = True):  
         self.dico_data = dico_data
-        # Always derive DataFrames from dico_data
+
         tables_raw = dico_data['data']['tables']
         fields_raw = dico_data['data']['fields']
+
         tables_df = pd.DataFrame.from_dict(tables_raw.values(), orient='columns')
         fields_df = pd.DataFrame.from_dict(fields_raw.values(), orient='columns')
+
         self.tables_df = tables_df[tables_df['stblKTable'].notna()] if 'stblKTable' in tables_df.columns else tables_df
         self.fields_df = fields_df[fields_df['sfldKTable'].notna()] if 'sfldKTable' in fields_df.columns else fields_df
         self.cleaned_tables = [t for t in tables_raw.values() if t['stblKind'] in ['E','R']]
@@ -33,9 +35,8 @@ class TableIngestionChunkBuilder:
                 self.client = OpenAI()
             except Exception:
                 self.enable_llm_summary = False
-        # Precompute relationship graph from linkedBeans
         self.relationship_graph = self._build_relationship_graph()
-        # Precompute FK parent candidates per table from linkedBeans
+
         self.parent_candidates = {tbl['stblName']: self.relationship_graph.get(tbl['stblName'], []) for tbl in self.cleaned_tables}
 
     def generate(self) -> List[Document]:
@@ -264,13 +265,13 @@ class TableIngestionChunkBuilder:
         for t in self.cleaned_tables:
             name = t.get('stblName')
             beans = t.get('linkedBeans', {}) or {}
-            rels = []
+            relatives = []
             for _, arr in beans.items():
                 for bean in arr:
                     target = bean.get('detailEntity')
                     if target and target != name:
-                        rels.append(target)
-            graph[name] = sorted(set(rels))
+                        relatives.append(target)
+            graph[name] = sorted(set(relatives))
         return graph
 
     def _build_relationship_path_content(self, parent: str, child: str) -> str:

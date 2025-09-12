@@ -451,7 +451,8 @@ class GenericFileIngestionRAGPipeline:
                 logging.info(f"Using fallback domain classification: {domain}")
             
             # Generate context prompt
-            prompt = f"The file is related to {domain}. Provide context for data ingestion considering columns: {', '.join(columns[:10])}. Find the best matching database tables and their relationships in the existing database schema for storing this {domain} data."
+            prompt = f"The file is related to {domain}."
+            f"Find the best matching database tables and their relationships in the existing database schema for storing this {domain} data."
             
             logging.info(f"Generated user context: {prompt[:100]}...")
             return prompt
@@ -461,15 +462,16 @@ class GenericFileIngestionRAGPipeline:
             return "Importing data from the file into the CRM system by mapping fields to the most relevant database table."
 
     def search_relevant_tables(self, queries, top_k=15):
-        """Search for relevant tables using multiple semantic queries with batch processing"""
+        """Search for relevant tables using multiple semantic queries with individual processing"""
         all_results = {}
         
-        # Batch process query embeddings for efficiency
-        logging.info(f"Creating embeddings for {len(queries)} search queries in batch...")
-        query_embeddings = self.create_batch_embeddings(queries, batch_size=10)
-        
-        for i, (query, query_embedding) in enumerate(zip(queries, query_embeddings)):
+        for i, query in enumerate(queries):
+            logging.info(f"Processing query {i+1}/{len(queries)}: {query[:50]}...")
+            
             try:
+                # Individual embedding creation
+                query_embedding = self.embeddings.embed_query(query)
+                
                 search_results = self.qdrant_client.query_points(
                     collection_name=self.collection_name,
                     query=query_embedding,
@@ -482,7 +484,6 @@ class GenericFileIngestionRAGPipeline:
                         ]
                     ),
                     limit=top_k
-                    # REMOVED: score_threshold to match notebook behavior
                 )
                 
                 for point in search_results.points:
@@ -508,31 +509,6 @@ class GenericFileIngestionRAGPipeline:
         
         return all_results
     
-    def create_batch_embeddings(self, texts, batch_size=50):
-        """Create embeddings in batches to reduce API calls"""
-        embeddings_list = []
-        
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            try:
-                # Use the embeddings client's embed_documents method for batch processing
-                batch_embeddings = self.embeddings.embed_documents(batch)
-                embeddings_list.extend(batch_embeddings)
-                logging.info(f"Processed batch {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}")
-            except Exception as e:
-                logging.error(f"Error processing batch {i//batch_size + 1}: {e}")
-                # Fallback to individual processing for this batch
-                for text in batch:
-                    try:
-                        embedding = self.embeddings.embed_query(text)
-                        embeddings_list.append(embedding)
-                    except Exception as e2:
-                        logging.error(f"Failed to embed individual text: {e2}")
-                        # Use zero vector as fallback
-                        embeddings_list.append([0.0] * 1536)  # OpenAI embedding dimension
-        
-        return embeddings_list
-    
     def rank_tables_by_relevance(self, search_results):
         """Rank tables by multiple relevance criteria"""
         ranked_tables = []
@@ -543,11 +519,7 @@ class GenericFileIngestionRAGPipeline:
             max_score = max(scores) if scores else 0
             query_coverage = len(set(data['queries_matched']))
             
-            # RESTORED: Original ranking strategy from notebook
             composite_score = (max_score * 0.4) + (avg_score * 0.4) + (query_coverage * 0.2)
-            
-            # COMMENTED OUT: Simple max_score for testing
-            # composite_score = max_score
             
             ranked_tables.append({
                 'table_name': table_name,
@@ -565,7 +537,7 @@ class GenericFileIngestionRAGPipeline:
         
         ranked_tables.sort(key=lambda x: x['composite_score'], reverse=True)
         return ranked_tables
-    
+
     def run_complete_pipeline(self, file_path, user_context=None):
         """Run the complete RAG pipeline for any file type"""
         logging.info("=== GENERIC FILE INGESTION RAG PIPELINE ===")
@@ -602,7 +574,7 @@ class GenericFileIngestionRAGPipeline:
             'user_context': user_context,
             'search_queries_used': queries,
             'total_tables_found': len(search_results),
-            'top_10_tables': ranked_tables[:10],  # Changed from top_5_tables to top_10_tables
+            'top_10_tables': ranked_tables[:10],
             'ingestion_summary': {
                 'recommended_table': ranked_tables[0]['table_name'] if ranked_tables else None,
                 'confidence_level': self._calculate_confidence_level(ranked_tables[0] if ranked_tables else None),
@@ -612,7 +584,7 @@ class GenericFileIngestionRAGPipeline:
         }
         
         return final_results
-    
+
     def _calculate_confidence_level(self, best_table):
         """Calculate confidence level for SQL agent"""
         if not best_table:
@@ -631,6 +603,24 @@ class GenericFileIngestionRAGPipeline:
             return True
         return best_table['composite_score'] < 0.7
     
+    def _calculate_confidence_level_vector(self, best_table):
+        """Calculate confidence level based on vector similarity score"""
+        if not best_table:
+            return 'None'
+        score = best_table['vector_score']
+        if score > 0.8:
+            return 'High'
+        elif score > 0.65:
+            return 'Medium'
+        else:
+            return 'Low'
+    
+    def _requires_review_vector(self, best_table):
+        """Determine if human review is needed based on vector score"""
+        if not best_table:
+            return True
+        return best_table['vector_score'] < 0.7
+
     def display_results_summary(self, results):
         """Display a formatted summary optimized for SQL agent consumption"""
         if 'error' in results:
@@ -668,7 +658,7 @@ class GenericFileIngestionRAGPipeline:
         if not output_file:
             file_name = results['file_analysis']['file_name']
             base_name = os.path.splitext(file_name)[0]
-            output_file = f"results_for_agent\{base_name}_ingestion_analysis.json"
+            output_file = rf"results_for_agent\{base_name}_ingestion_analysis.json"
         
         sql_agent_data = {
             'source_file': results['file_analysis']['file_name'],
@@ -686,11 +676,11 @@ class GenericFileIngestionRAGPipeline:
                 {
                     'table_name': table['table_name'],
                     'table_code': table['table_code'],
-                    'relevance_score': round(table['composite_score'], 3),
+                    'composite_score': round(table['composite_score'], 3),
                     'field_count': table['field_count'],
                     'table_schema': table['content']
                 }
-                for table in results['top_10_tables']  # Changed from top_5_tables to top_10_tables
+                for table in results['top_10_tables']
             ],
             'generation_timestamp': pd.Timestamp.now().isoformat()
         }
@@ -709,7 +699,7 @@ logging.info("GenericFileIngestionRAGPipeline class complete with all methods")
 
 
 def feed_vector_store(dico_api, qdrant_client, embeddings, collection_name):
-    """Feed mode: Fetch DICO data, create chunks, and populate vector store"""
+    """Feed mode: Fetch DICO data, create chunks, and populate vector store """
     logging.info("=== FEED MODE: Building Vector Store ===")
     
     # Fetch DICO data
@@ -738,28 +728,24 @@ def feed_vector_store(dico_api, qdrant_client, embeddings, collection_name):
     else: 
         logging.info(f"Using existing collection: {collection_name}")
 
-    # Batch process embeddings for efficiency
-    logging.info("Creating embeddings in batches for efficiency...")
-    
-    # Extract all chunk contents for batch processing
-    chunk_contents = [chunk.page_content for chunk in table_chunks]
-    
-    # Create temporary pipeline instance to use batch processing method
-    temp_pipeline = GenericFileIngestionRAGPipeline(qdrant_client, embeddings, collection_name)
-    embedding_vectors = temp_pipeline.create_batch_embeddings(chunk_contents, batch_size=50)
+    # Individual embedding creation
+    logging.info("Creating individual embeddings...")
     
     # Create points for vector store
     table_points = []
-    for i, chunk in enumerate(table_chunks):
+    for chunk in table_chunks:
         chunk_id = Indexer.stable_id(
             chunk.metadata['chunk_type'],
             chunk.metadata['primary_table'],
             chunk.metadata['table_code']
         )
 
+        # Individual embedding creation
+        embedding = embeddings.embed_query(chunk.page_content)
+
         point = PointStruct(
             id=chunk_id,
-            vector=embedding_vectors[i],  # Use pre-computed batch embedding
+            vector=embedding,
             payload={
                 'content': chunk.page_content,
                 'chunk_type': chunk.metadata['chunk_type'],
@@ -869,7 +855,7 @@ def main():
     )
     
     # Create collection name
-    collection_name = f"{dico_getter.customer.lower()}_database_schema"
+    collection_name = "maxo_vector_store_v2" #f"{dico_getter.customer.lower()}_database_schema"
     
     if mode == 'feed':
         success = feed_vector_store(dico_getter, qdrant_client, embeddings, collection_name)

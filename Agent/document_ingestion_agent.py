@@ -1,16 +1,3 @@
-"""
-Enhanced Document Ingestion Agent with Vision Capabilities and RAG Pipeline
-
-This module implements a comprehensive document processing agent that can:
-1. Support bulk import for various file formats (PDF, CSV, XLSX, JSON, images)
-2. Classify documents by type (receipt, form, contact card, etc.)
-3. Extract data using Vision Large Model (VLM)
-4. Structure data with Large Language Model (LLM)
-5. Use RAG pipeline to enhance LLM context with database knowledge
-6. Generate accurate SQL queries for CRM database ingestion
-7. Provide standardized responses for software integration
-"""
-
 import os
 import json
 import base64

@@ -11,6 +11,12 @@ from dotenv import load_dotenv
 # Import SQLCodeParser from utils.py to avoid circular import
 from utils import SQLCodeParser
 
+# Import RAG components
+from RAG.RAG_maxo_database import GenericFileIngestionRAGPipeline, DicoAPI
+from RAG.config import config
+from qdrant_client import QdrantClient
+from langchain_openai import OpenAIEmbeddings
+
 # PDF processing imports
 try:
     import PyPDF2
@@ -22,6 +28,23 @@ except ImportError:
 
 load_dotenv()
 vision_llm = ChatOpenAI(model="gpt-4o")
+
+# Initialize RAG components once at module level
+try:
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    QDRANT_URL = os.getenv("QDRANT_URL")
+    QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+    
+    rag_embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    rag_qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+    
+    # Use the same collection name as in your RAG script
+    rag_collection_name = "maxo_vector_store_v2"
+    
+    RAG_AVAILABLE = True
+except Exception as e:
+    print(f"Warning: RAG components not available: {e}")
+    RAG_AVAILABLE = False
 
 @tool
 def analyze_file(file_path: str) -> str:
@@ -380,9 +403,147 @@ def python_code_executor(code: str) -> str:
     except Exception as e:
         return f"Error executing code: {str(e)}"
 
+@tool
+def find_matching_database_tables(file_path: str, user_context: str = None) -> str:
+    """
+    Find the most relevant database tables for ingesting data from a file using RAG.
+    Analyzes file structure and matches it against existing database schema using semantic search.
+    
+    Args:
+        file_path: Path to the file to analyze for database ingestion
+        user_context: Optional context about the data or intended use
+    
+    Returns:
+        JSON string with top 10 matching tables, confidence scores, and ingestion recommendations
+    """
+    if not RAG_AVAILABLE:
+        return "Error: RAG components not available. Please check your environment configuration."
+    
+    if not os.path.exists(file_path):
+        return f"Error: File not found at {file_path}"
+    
+    try:
+        # Check if collection exists
+        existing_collections = [col.name for col in rag_qdrant_client.get_collections().collections]
+        if rag_collection_name not in existing_collections:
+            return f"Error: Database schema collection '{rag_collection_name}' not found. Please run the RAG feed mode first to populate the vector store."
+        
+        # Initialize pipeline
+        pipeline = GenericFileIngestionRAGPipeline(
+            rag_qdrant_client, 
+            rag_embeddings, 
+            rag_collection_name
+        )
+        
+        # Generate user context if not provided
+        if not user_context:
+            user_context = pipeline.generate_user_context_by_file_type(file_path)
+        
+        # Run RAG pipeline
+        results = pipeline.run_complete_pipeline(file_path, user_context)
+        
+        if 'error' in results:
+            return f"Error: {results['error']}"
+        
+        # Format results for agent consumption
+        summary = {
+            "file_analysis": {
+                "file_name": results['file_analysis']['file_name'],
+                "file_type": results['file_analysis']['file_type'],
+                "total_rows": results['file_analysis']['total_rows'],
+                "total_columns": results['file_analysis']['total_columns'],
+                "columns": results['file_analysis']['columns']
+            },
+            "domain_detected": results['inferred_domain']['primary_domain'],
+            "recommended_table": results['ingestion_summary']['recommended_table'],
+            "confidence_level": results['ingestion_summary']['confidence_level'],
+            "sql_agent_ready": results['ingestion_summary']['sql_agent_ready'],
+            "requires_review": results['ingestion_summary']['requires_review'],
+            "top_10_tables": [
+                {
+                    "rank": i + 1,
+                    "table_name": table['table_name'],
+                    "table_code": table['table_code'],
+                    "table_kind": table['table_kind'],
+                    "composite_score": round(table['composite_score'], 3),
+                    "field_count": table['field_count'],
+                    "schema_preview": table['content'][:500] + "..." if len(table['content']) > 500 else table['content']
+                }
+                for i, table in enumerate(results['top_10_tables'])
+            ]
+        }
+        
+        # Export detailed results for further processing
+        export_result = pipeline.export_for_sql_agent(results)
+        if 'success' in export_result:
+            summary["detailed_export_path"] = export_result['output_file']
+        
+        return json.dumps(summary, indent=2)
+        
+    except Exception as e:
+        return f"Error running RAG pipeline: {str(e)}"
+
+@tool
+def get_table_schema_details(table_name: str) -> str:
+    """
+    Get detailed schema information for a specific database table.
+    
+    Args:
+        table_name: Name of the database table to get schema details for
+    
+    Returns:
+        Detailed schema information including fields, relationships, and usage context
+    """
+    if not RAG_AVAILABLE:
+        return "Error: RAG components not available. Please check your environment configuration."
+    
+    try:
+        # Search for the specific table in the vector store
+        query_embedding = rag_embeddings.embed_query(f"database table schema for {table_name}")
+        
+        from qdrant_client import models
+        search_results = rag_qdrant_client.query_points(
+            collection_name=rag_collection_name,
+            query=query_embedding,
+            query_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="chunk_type",
+                        match=models.MatchValue(value="table_ingestion_profile")
+                    ),
+                    models.FieldCondition(
+                        key="primary_table",
+                        match=models.MatchValue(value=table_name)
+                    )
+                ]
+            ),
+            limit=1
+        )
+        
+        if not search_results.points:
+            return f"Table '{table_name}' not found in database schema. Please check the table name."
+        
+        table_data = search_results.points[0].payload
+        
+        schema_details = {
+            "table_name": table_data['primary_table'],
+            "table_code": table_data['table_code'],
+            "table_kind": table_data['table_kind'],
+            "field_count": table_data['field_count'],
+            "full_schema": table_data['content'],
+            "metadata": table_data['metadata']
+        }
+        
+        return json.dumps(schema_details, indent=2)
+        
+    except Exception as e:
+        return f"Error retrieving table schema: {str(e)}"
+
 # Available tools for the agent
 tools = [
     analyze_file,
     generate_sql_schema,
-    python_code_executor
+    python_code_executor,
+    find_matching_database_tables,
+    get_table_schema_details
 ]

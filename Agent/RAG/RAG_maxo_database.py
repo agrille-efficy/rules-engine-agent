@@ -4,14 +4,19 @@ import pandas as pd
 import hashlib 
 import logging 
 import requests 
+import time
+from functools import wraps
 
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models 
 from qdrant_client.models import PointStruct, PayloadSchemaType 
 from langchain_openai import OpenAIEmbeddings, OpenAI 
 
-from chunk_generator import generate_table_ingestion_chunks
-from config import config
+from .chunk_generator import generate_table_ingestion_chunks
+from .config import config
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = None
 
 # Load environment variables
 load_dotenv(r'C:\Users\axel.grille\Documents\rules-engine-agent\Agent\.env')
@@ -93,12 +98,20 @@ class GenericFileIngestionRAGPipeline:
     database tables for data ingestion using semantic search and LLM analysis.
     """
     
-    def __init__(self, qdrant_client, embeddings, collection_name):
+    def __init__(self, qdrant_client, embeddings, collection_name, query_only=True):
         self.qdrant_client = qdrant_client
         self.embeddings = embeddings
         self.collection_name = collection_name
         self.llm_client = OpenAI()
         self.supported_formats = ['.csv', '.xlsx', '.xls', '.json', '.txt', '.tsv']
+        self.query_only = query_only  # Force query-only mode
+        
+        # Verify collection exists in query-only mode
+        if self.query_only:
+            existing_collections = [col.name for col in self.qdrant_client.get_collections().collections]
+            if self.collection_name not in existing_collections:
+                raise ValueError(f"Collection '{self.collection_name}' does not exist. Please run the RAG system in 'feed' mode first to populate the vector store.")
+            logging.info(f"Query-only mode: Using existing collection '{self.collection_name}'")
     
     def analyze_file_structure(self, file_path):
         """Analyze any supported file structure and content"""
@@ -365,7 +378,6 @@ class GenericFileIngestionRAGPipeline:
             f"business data management system for {domain_hints['business_area']} information",
             f"data warehouse table for {domain_hints['data_category']} records and analytics",
             f"structured data storage for {file_name} content in enterprise database",
-            # Add more generic queries to find additional tables
             "email communication tracking and management system",
             "customer correspondence and interaction history",
             "mail message storage and organization",
@@ -381,10 +393,6 @@ class GenericFileIngestionRAGPipeline:
         
         return query_templates
     
-    ###########################################################################
-    # ADD A CLASSIFIER TO LABEL THE FILE TYPE (EMAIL, APPOINTMENT, LEAD, ...) #
-    ###########################################################################
-
     def generate_user_context_by_file_type(self, file_path):
         """Generate user context prompt based on file type and columns with proper error handling"""
         try:

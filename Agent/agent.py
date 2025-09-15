@@ -2,7 +2,6 @@ import base64
 import os
 import requests
 import uuid
-import faiss
 import tempfile
 
 import pandas as pd
@@ -10,23 +9,20 @@ import pandas as pd
 from typing import Optional
 from dotenv import load_dotenv
 from urllib.parse import urlparse 
-from image_processing import *
-from code_interpreter import CodeInterpreter
-from openai import OpenAI
+from .image_processing import *
+from .code_interpreter import CodeInterpreter
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, MessagesState
-from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.store.memory import InMemoryStore
 
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain.tools.retriever import create_retriever_tool
 
-from tools import tools as file_processing_tools
+from langchain_openai import ChatOpenAI
+
+# Import the enhanced ingestion tools
+from .tools import all_ingestion_tools
 
 load_dotenv(r'C:\Users\axel.grille\Documents\rules-engine-agent\Agent\.env')
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -270,100 +266,54 @@ def analyze_excel_file(file_path: str, query: str) -> str:
 
 # Load system prompt from file
 try:
-    with open("Agent\system_prompt.txt", "r") as f:
+    with open(r"Agent\prompts\system_prompt.txt", "r") as f:
         system_prompt = f.read()
 except FileNotFoundError:
     raise FileNotFoundError("system_prompt.txt file is required. Please ensure it exists in the current directory.")
 
-sys_msg = SystemMessage(content=system_prompt)
+# Enhanced system prompt with workflow awareness
+enhanced_system_prompt = f"""{system_prompt}
 
-# # retriever
-# embeddings = OpenAIEmbeddings()
+## ENHANCED DATABASE INGESTION CAPABILITIES
 
-# # Load vector store
-# try:
-#     rag_dir = "./Agent/RAG/"
-#     vector_store = None
-#     vector_store_found = False
+You now have access to a powerful 4-step database ingestion workflow:
 
-#     if not os.path.exists(rag_dir):
-#         print(f"Directory {rag_dir} does not exist.")
-#     else:
-#         print(f"Directory {rag_dir} exists.")
+**MAIN TOOL: database_ingestion_orchestrator**
+- Use this for complete file-to-database ingestion workflows
+- Automatically handles: file analysis → RAG matching → table selection → SQL generation
+- Perfect for: "ingest this file", "load into database", "create table from file"
 
-#         try:
-#             files = os.listdir(rag_dir)
-#             if not files:
-#                 print(f"No files found in directory {rag_dir}")
-#             else:
-#                 vector_store_files = [f for f in files if "vector_store" in f and not f.endswith(".pkl")]
-                
-#                 if vector_store_files:
-#                     vector_store_file = vector_store_files[0]
-#                     vector_store_path = os.path.join(rag_dir, vector_store_file)
-#                     print(f"Vector store found: {vector_store_file}") 
+**INDIVIDUAL TOOLS** (use when user wants step-by-step control):
+1. **analyze_file** - Analyze file structure (supports PDF via Vision LLM)
+2. **find_matching_database_tables** - RAG-powered table matching
+3. **intelligent_table_selector** - Smart table selection with field mapping
+4. **enhanced_sql_generator** - Production-ready SQL generation
 
-#                     try:
-#                         vector_store = FAISS.load_local(
-#                             vector_store_path,
-#                             embeddings,
-#                             allow_dangerous_deserialization=True
-#                         )
-#                         print(f"Vector store loaded from: {vector_store_path}")
-#                         vector_store_found = True 
-#                     except Exception as load_error:
-#                         print(f"Error loading vector store: {load_error}")
-#                         vector_store = None 
-#                 else: 
-#                     print("No vector store file found in directory")
+**USAGE PATTERNS:**
+- Single command: "Please ingest [file] into the database" → use database_ingestion_orchestrator
+- Step-by-step: "First analyze this file" → use individual tools
+- Complex scenarios: "Find tables for this data but let me choose" → use individual tools
 
+**SUPPORTED FILE TYPES:**
+- PDFs (with Vision LLM OCR/extraction)
+- CSV, Excel, JSON
+- Images (invoices, forms, documents)
+- Text files
 
-#         except PermissionError:
-#             print(f"Permission denied when accessing directory {rag_dir}")
-#         except Exception as e:
-#             print(f"Error accessing directory {rag_dir}: {e}")
-           
+Always prioritize the orchestrator for complete workflows unless the user specifically requests individual steps."""
 
-#     if not vector_store_found or vector_store is None:
-#         print("Warning: Vector store not found or failed to load. Creating empty vector store.")
-#         try:
-#             # Create a minimal vector store with proper parameters
-#             embeddings_dim = len(embeddings.embed_query("hello world"))
-#             index = faiss.IndexFlatL2(embeddings_dim)
-            
-#             vector_store = FAISS(
-#                 embedding_function=embeddings,
-#                 index=index,
-#                 docstore={},
-#                 index_to_docstore_id={}
-#             )
-#         except Exception as fallback_error:
-#             print(f"Error creating fallback vector store: {fallback_error}")
-#             from langchain_community.docstore.in_memory import InMemoryDocstore
-#             embeddings_dim = 1536  
-#             index = faiss.IndexFlatL2(embeddings_dim)
-#             vector_store = FAISS(
-#                 embedding_function=embeddings,
-#                 index=index,
-#                 docstore=InMemoryDocstore({}),
-#                 index_to_docstore_id={}
-#             )
+sys_msg = SystemMessage(content=enhanced_system_prompt)
 
-# except Exception as e:
-#     print(f"Warning: Could not load vector store: {e}")
-#     # Create a minimal vector store with dummy data
-#     index = faiss.IndexFlatL2(len(embeddings.embed_query("hello world")))
-#     vector_store = FAISS(embeddings, index, {}, {})
-
-# create_retriever_tool = create_retriever_tool(
-#     retriever=vector_store.as_retriever(),
-#     name="Question_search", 
-#     description="A tool to retrieve similar questions from a vector store."
-# )
-
-# Focused tools for file processing, vision analysis, and database ingestion
-tools = file_processing_tools # + [create_retriever_tool]
-
+# Use the enhanced tools that include the 4-step workflow
+tools = all_ingestion_tools + [
+    image_describer,
+    code_executor, 
+    save_and_read_file,
+    download_file_from_url,
+    extract_structured_data_from_image,
+    analyze_csv_file,
+    analyze_excel_file
+]
 
 def build_graph():
     """Build the graph"""
@@ -371,65 +321,145 @@ def build_graph():
     chat_with_tools = chat.bind_tools(tools)
 
     def assistant(state: MessagesState):
-        return {
-            "messages": [chat_with_tools.invoke(state["messages"])]
-        }
-    
-    # def retriever(state: MessagesState):
-    #     """Retriever node"""
-    #     try:
-    #         similar_question = vector_store.similarity_search(
-    #         query=state["messages"][0].content,
-    #         k=5
-    #         )
-    #         if not similar_question:
-    #             example_msg = HumanMessage(
-    #                 content="No similar questions were found in the vector store."
-    #             )
-    #             print("No similar questions found")
-    #         else:
-    #             example_msg = HumanMessage(
-    #                 content=f"Here I provide a similar question and answer for reference: \n\n{similar_question[0].page_content}",
-    #             )
-    #             print("Similar question found for reference")
-    #         return {"messages": [sys_msg] + state["messages"] + [example_msg]}
-    #     except Exception as e:
-    #         print(f"Retriever error: {e}")
-    #         # Return minimal state if retriever fails
-    #         return {"messages": [sys_msg] + state["messages"]}
+        """Enhanced assistant with workflow context"""
+        messages = [sys_msg] + state["messages"]
+        
+        # Add workflow intelligence
+        last_message = state["messages"][-1] if state["messages"] else None
+        if last_message and hasattr(last_message, 'content'):
+            content_lower = last_message.content.lower()
+            
+            # Detect database ingestion intent
+            ingestion_keywords = ['ingest', 'import', 'load', 'database', 'table', 'sql', 'create table']
+            file_extensions = ['.csv', '.excel', '.xlsx', '.pdf', '.json']
+            
+            is_ingestion_request = (
+                any(keyword in content_lower for keyword in ingestion_keywords) or
+                any(ext in content_lower for ext in file_extensions) or
+                'database_ingestion_orchestrator' in content_lower
+            )
+            
+            if is_ingestion_request:
+                workflow_hint = HumanMessage(content="""
+WORKFLOW HINT: This appears to be a database ingestion request. 
 
-    print("Setting up graph nodes...")
+Consider using the `database_ingestion_orchestrator` tool for complete workflows, or individual tools for step-by-step control:
+- Complete workflow: database_ingestion_orchestrator(file_path, user_context)
+- Individual steps: analyze_file → find_matching_database_tables → intelligent_table_selector → enhanced_sql_generator
 
-    # checkpointer = InMemorySaver() # Simple in-memory checkpointer for short-term memory
-    # store = InMemoryStore() # In-memory store for long-term memory
+Choose based on user's preference for automation vs. control.
+""")
+                messages.append(workflow_hint)
+        
+        response = chat_with_tools.invoke(messages)
+        return {"messages": [response]}
 
+    def workflow_result_processor(state: MessagesState):
+        """Process and format workflow results for better user experience"""
+        last_message = state["messages"][-1]
+        
+        # Check if the last message contains workflow results
+        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            for tool_call in last_message.tool_calls:
+                if tool_call.name == 'database_ingestion_orchestrator':
+                    # Add a helpful summary message
+                    summary_msg = HumanMessage(content="""
+**Database Ingestion Workflow Completed!**
+
+The orchestrator has executed all 4 steps:
+1.  File Analysis (Structure & Content)
+2.  RAG Table Matching (Found relevant tables)  
+3.  Intelligent Table Selection (Chose optimal table + field mappings)
+4.  SQL Generation (Production-ready CREATE/INSERT statements)
+
+The generated SQL is ready for execution. Would you like me to:
+- Show you the SQL statements?
+- Explain the field mappings?
+- Help you execute the SQL?
+- Make any modifications?
+""")
+                    return {"messages": state["messages"] + [summary_msg]}
+        
+        return {"messages": state["messages"]}
+
+    # Build the enhanced graph
     builder = StateGraph(MessagesState)
-    # builder.add_node("retriever", retriever)
+    
+    # Add nodes
     builder.add_node("assistant", assistant)
     builder.add_node("tools", ToolNode(tools))
-
-    # builder.add_edge(START, "retriever")
-    # builder.add_edge("retriever", "assistant")
+    builder.add_node("workflow_processor", workflow_result_processor)
+    
+    # Add edges
     builder.add_edge(START, "assistant")
+    
+    # Conditional routing from assistant
     builder.add_conditional_edges(
         "assistant",
         tools_condition,
+        {
+            "tools": "tools",
+            "__end__": "__end__"
+        }
     )
-    builder.add_edge("tools", "assistant")
-
-    print("Graph compilation complete")
-    # Compile graph
-    # graph =  builder.compile(checkpointer=checkpointer, store = store)
     
+    # Process workflow results before returning to assistant
+    builder.add_edge("tools", "workflow_processor")
+    builder.add_edge("workflow_processor", "assistant")
+
+    print("Enhanced Graph compilation complete - 4-Step Workflow Ready!")
     return builder.compile()
 
 if __name__ == "__main__":
-    question = open("system_prompt.txt", "r").read()
-    # Build the graph
+    import sys
+    import argparse
+    from .tools import database_ingestion_orchestrator as _orch_tool
+
+    parser = argparse.ArgumentParser(description="Agent 4-step ingestion assistant")
+    parser.add_argument("file", nargs="?", help="Optional file path to ingest directly (skips interactive chat)")
+    parser.add_argument("--table-name", dest="table_name", help="Preferred table name override", default=None)
+    parser.add_argument("--context", dest="user_context", help="Optional user context for ingestion", default=None)
+    args = parser.parse_args()
+
     graph = build_graph()
 
-    # Run the graph
-    messages = [HumanMessage(content=question)]
-    messages = graph.invoke({"messages": messages})
-    for m in messages["messages"]:
-        m.pretty_print()
+    # Direct file ingestion mode
+    if args.file:
+        file_path = args.file
+        if not os.path.exists(file_path):
+            print(f"Error: File not found: {file_path}")
+            sys.exit(1)
+        print(f"Running 4-step ingestion workflow for: {file_path}\n")
+        # _orch_tool is a LangChain tool; access underlying callable
+        try:
+            orchestration_fn = getattr(_orch_tool, "func", _orch_tool)  # fallback if decorator changed
+            result = orchestration_fn(file_path=file_path, user_context=args.user_context, table_name_preference=args.table_name)
+            print(result)
+        except Exception as e:
+            print(f"Workflow failed: {e}")
+            sys.exit(1)
+        sys.exit(0)
+
+    # Interactive chat mode
+    print("Interactive ingestion assistant. Type a request (e.g., 'Ingest cobalt_global_maj-rej-0001_2706.csv') or 'quit' to exit.\n")
+    messages = []
+    thread_config = {"configurable": {"thread_id": "cli_session"}}
+
+    while True:
+        try:
+            user_input = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nExiting.")
+            break
+        if not user_input:
+            continue
+        if user_input.lower() in {"quit", "exit"}:
+            print("Goodbye.")
+            break
+        messages.append(HumanMessage(content=user_input))
+        result = graph.invoke({"messages": messages}, config=thread_config)
+        messages = result["messages"]
+        # Find last AI / tool relevant response
+        last_msg = messages[-1]
+        content = getattr(last_msg, "content", "")
+        print(f"Agent: {content}\n")

@@ -1,615 +1,3 @@
-# import os
-# import pandas as pd
-# import json
-# import base64
-# import time
-# from functools import wraps
-# from langchain_core.tools import tool
-# from langchain_core.messages import HumanMessage
-# from langchain_openai import ChatOpenAI
-
-# from dotenv import load_dotenv
-
-# # Import SQLCodeParser from utils.py to avoid circular import
-# from utils import SQLCodeParser
-
-# # Import RAG components
-# from .RAG.RAG_maxo_database import GenericFileIngestionRAGPipeline, DicoAPI
-# from .RAG.config import config
-# from qdrant_client import QdrantClient
-# from langchain_openai import OpenAIEmbeddings
-
-# # Enhanced logging import
-# try:
-#     from logging_config import get_logger
-#     logger = get_logger()
-#     ENHANCED_LOGGING = True
-# except ImportError:
-#     import logging
-#     logging.basicConfig(level=logging.INFO)
-#     logger = None
-#     ENHANCED_LOGGING = False
-
-# # Performance monitoring decorator
-# def monitor_performance(operation_name: str):
-#     """Decorator to monitor performance of tool operations"""
-#     def decorator(func):
-#         @wraps(func)
-#         def wrapper(*args, **kwargs):
-#             start_time = time.time()
-            
-#             try:
-#                 if ENHANCED_LOGGING:
-#                     logger.log_workflow_step(f"{operation_name} - Start", "start")
-                
-#                 result = func(*args, **kwargs)
-                
-#                 end_time = time.time()
-#                 duration = end_time - start_time
-                
-#                 if ENHANCED_LOGGING:
-#                     logger.log_performance(operation_name, duration, {
-#                         "args_count": len(args),
-#                         "success": True
-#                     })
-#                     logger.log_workflow_step(f"{operation_name} - Complete", "success", {
-#                         "duration": f"{duration:.3f}s"
-#                     })
-                
-#                 return result
-                
-#             except Exception as e:
-#                 end_time = time.time()
-#                 duration = end_time - start_time
-                
-#                 if ENHANCED_LOGGING:
-#                     logger.log_error_with_context(e, {
-#                         "operation": operation_name,
-#                         "duration": duration,
-#                         "args_count": len(args)
-#                     })
-#                     logger.log_workflow_step(f"{operation_name} - Failed", "error", {
-#                         "error": str(e),
-#                         "duration": f"{duration:.3f}s"
-#                     })
-                
-#                 raise
-                
-#         return wrapper
-#     return decorator
-
-# load_dotenv()
-# vision_llm = ChatOpenAI(model="gpt-4o")
-
-# # Initialize RAG components once at module level
-# try:
-#     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-#     QDRANT_URL = os.getenv("QDRANT_URL")
-#     QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-    
-#     rag_embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-#     rag_qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-    
-#     # Use the same collection name as in your RAG script
-#     rag_collection_name = "maxo_vector_store_v2"
-    
-#     RAG_AVAILABLE = True
-# except Exception as e:
-#     print(f"Warning: RAG components not available: {e}")
-#     RAG_AVAILABLE = False
-
-# @tool
-# @monitor_performance("analyze_file")
-# def analyze_file(file_path: str) -> str:
-#     """
-#     Analyze various file types including PDF, CSV, Excel, JSON, images, and text files.
-#     Extracts content and provides structured analysis for database ingestion.
-    
-#     Args:
-#         file_path: Path to the file to analyze
-#     """
-#     if not os.path.exists(file_path):
-#         return f"Error: File not found at {file_path}"
-    
-#     file_extension = os.path.splitext(file_path)[1].lower()
-    
-#     try:
-#         if file_extension == '.pdf':
-#             return _analyze_pdf(file_path)
-#         elif file_extension in ['.csv']:
-#             return _analyze_csv(file_path)
-#         elif file_extension in ['.xlsx', '.xls']:
-#             return _analyze_excel(file_path)
-#         elif file_extension == '.json':
-#             return _analyze_json(file_path)
-#         elif file_extension in ['.png', '.jpg', '.jpeg', '.gif', '.bmp']:
-#             return _analyze_image(file_path)
-#         elif file_extension in ['.txt', '.xml']:
-#             return _analyze_text(file_path)
-#         else:
-#             return f"Unsupported file type: {file_extension}"
-    
-#     except Exception as e:
-#         return f"Error analyzing file: {str(e)}"
-
-# def _analyze_pdf(file_path: str) -> str:
-#     """Analyze PDF files with text extraction and OCR fallback."""
-#     if not PDF_AVAILABLE:
-#         return "Error: PDF processing libraries not installed. Please install PyPDF2, pdfplumber, and PyMuPDF."
-    
-#     results = []
-#     text_content = ""
-    
-#     # Try text extraction first
-#     try:
-#         with pdfplumber.open(file_path) as pdf:
-#             text_pages = []
-#             for i, page in enumerate(pdf.pages):
-#                 page_text = page.extract_text()
-#                 if page_text:
-#                     text_pages.append(f"Page {i+1}:\n{page_text}")
-            
-#             if text_pages:
-#                 text_content = "\n\n".join(text_pages)
-#     except Exception as e:
-#         results.append(f"Text extraction error: {str(e)}")
-    
-#     # If no text found, try OCR on PDF images
-#     if not text_content.strip():
-#         try:
-#             doc = fitz.open(file_path)
-#             ocr_pages = []
-#             for page_num in range(len(doc)):
-#                 page = doc.load_page(page_num)
-#                 pix = page.get_pixmap()
-#                 img_data = pix.tobytes("png")
-                
-#                 # Use vision model for better OCR
-#                 image_base64 = base64.b64encode(img_data).decode('utf-8')
-#                 ocr_text = _extract_text_from_image_base64(image_base64)
-#                 if ocr_text:
-#                     ocr_pages.append(f"Page {page_num+1} (OCR):\n{ocr_text}")
-            
-#             if ocr_pages:
-#                 text_content = "\n\n".join(ocr_pages)
-#             doc.close()
-#         except Exception as e:
-#             results.append(f"OCR error: {str(e)}")
-    
-#     if text_content:
-#         results.append(f"PDF Content Analysis:\n{text_content[:2000]}...")
-        
-#         # Analyze structure for database design
-#         lines = text_content.split('\n')
-#         potential_headers = [line.strip() for line in lines[:20] if line.strip() and len(line.strip()) < 100]
-        
-#         results.append(f"\nStructural Analysis:")
-#         results.append(f"- Total pages: {len(text_content.split('Page '))}")
-#         results.append(f"- Potential headers/fields: {potential_headers[:5]}")
-        
-#         # Look for tabular data patterns
-#         table_patterns = []
-#         for line in lines:
-#             if '|' in line or '\t' in line or ',' in line:
-#                 table_patterns.append(line.strip())
-        
-#         if table_patterns:
-#             results.append(f"- Potential tabular data found: {len(table_patterns)} lines")
-#             results.append(f"- Sample: {table_patterns[0][:100]}...")
-    
-#     else:
-#         results.append("No text content could be extracted from the PDF")
-    
-#     return "\n".join(results)
-
-# def _analyze_csv(file_path: str) -> str:
-#     """Analyze CSV files for database schema generation."""
-#     try:
-#         df = pd.read_csv(file_path)
-        
-#         results = []
-#         results.append(f"CSV Analysis for: {os.path.basename(file_path)}")
-#         results.append(f"Dimensions: {df.shape[0]} rows, {df.shape[1]} columns")
-#         results.append(f"Columns: {list(df.columns)}")
-        
-#         # Data types analysis
-#         results.append("\nData Types Analysis:")
-#         for col in df.columns:
-#             dtype = df[col].dtype
-#             null_count = df[col].isnull().sum()
-#             unique_count = df[col].nunique()
-            
-#             # Infer SQL data type
-#             if dtype == 'object':
-#                 max_length = df[col].astype(str).str.len().max()
-#                 sql_type = f"VARCHAR({min(max_length + 50, 500)})"
-#             elif dtype in ['int64', 'int32']:
-#                 sql_type = "INTEGER"
-#             elif dtype in ['float64', 'float32']:
-#                 sql_type = "DECIMAL(10,2)"
-#             elif 'datetime' in str(dtype):
-#                 sql_type = "DATETIME"
-#             else:
-#                 sql_type = "TEXT"
-            
-#             results.append(f"  {col}: {sql_type} (nulls: {null_count}, unique: {unique_count})")
-        
-#         # Sample data
-#         results.append(f"\nSample Data (first 3 rows):")
-#         results.append(df.head(3).to_string())
-        
-#         return "\n".join(results)
-    
-#     except Exception as e:
-#         return f"Error analyzing CSV: {str(e)}"
-
-# def _analyze_excel(file_path: str) -> str:
-#     """Analyze Excel files for database schema generation."""
-#     try:
-#         # Get all sheet names
-#         excel_file = pd.ExcelFile(file_path)
-#         sheet_names = excel_file.sheet_names
-        
-#         results = []
-#         results.append(f"Excel Analysis for: {os.path.basename(file_path)}")
-#         results.append(f"Sheets found: {sheet_names}")
-        
-#         # Analyze each sheet
-#         for sheet_name in sheet_names[:3]:  # Limit to first 3 sheets
-#             df = pd.read_excel(file_path, sheet_name=sheet_name)
-            
-#             results.append(f"\n--- Sheet: {sheet_name} ---")
-#             results.append(f"Dimensions: {df.shape[0]} rows × {df.shape[1]} columns")
-#             results.append(f"Columns: {list(df.columns)}")
-            
-#             # Data types for first sheet only (to avoid too much output)
-#             if sheet_name == sheet_names[0]:
-#                 results.append("\nData Types Analysis:")
-#                 for col in df.columns:
-#                     dtype = df[col].dtype
-#                     if dtype == 'object':
-#                         max_length = df[col].astype(str).str.len().max()
-#                         sql_type = f"VARCHAR({min(max_length + 50, 500)})"
-#                     elif dtype in ['int64', 'int32']:
-#                         sql_type = "INTEGER"
-#                     elif dtype in ['float64', 'float32']:
-#                         sql_type = "DECIMAL(10,2)"
-#                     else:
-#                         sql_type = "TEXT"
-                    
-#                     results.append(f"  {col}: {sql_type}")
-                
-#                 results.append(f"\nSample Data:")
-#                 results.append(df.head(2).to_string())
-        
-#         return "\n".join(results)
-    
-#     except Exception as e:
-#         return f"Error analyzing Excel: {str(e)}"
-
-# def _analyze_json(file_path: str) -> str:
-#     """Analyze JSON files for database schema generation."""
-#     try:
-#         with open(file_path, 'r', encoding='utf-8') as f:
-#             data = json.load(f)
-        
-#         results = []
-#         results.append(f"JSON Analysis for: {os.path.basename(file_path)}")
-        
-#         if isinstance(data, list):
-#             results.append(f"Type: Array with {len(data)} items")
-#             if data:
-#                 sample_item = data[0]
-#                 results.append(f"Sample item structure: {list(sample_item.keys()) if isinstance(sample_item, dict) else type(sample_item)}")
-#         elif isinstance(data, dict):
-#             results.append(f"Type: Object with {len(data)} keys")
-#             results.append(f"Keys: {list(data.keys())}")
-        
-#         # Show structure
-#         results.append(f"\nStructure Preview:")
-#         results.append(json.dumps(data, indent=2)[:1000] + "..." if len(str(data)) > 1000 else json.dumps(data, indent=2))
-        
-#         return "\n".join(results)
-    
-#     except Exception as e:
-#         return f"Error analyzing JSON: {str(e)}"
-
-# def _analyze_image(file_path: str) -> str:
-#     """Analyze images using vision model for structured data extraction."""
-#     try:
-#         with open(file_path, 'rb') as f:
-#             image_bytes = f.read()
-        
-#         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-        
-#         message = [
-#             HumanMessage(
-#                 content=[
-#                     {
-#                         "type": "text",
-#                         "text": (
-#                             "Analyze this image for structured data extraction and database ingestion. "
-#                             "If this is a document (invoice, form, receipt, etc.), extract all text and organize it into structured fields. "
-#                             "If it contains tabular data, identify columns and rows. "
-#                             "Provide the extracted information in a clear, structured format suitable for database storage. "
-#                             "Also suggest appropriate database field names and data types."
-#                         ),
-#                     },
-#                     {
-#                         "type": "image_url",
-#                         "image_url": {
-#                             "url": f"data:image/png;base64,{image_base64}",
-#                         }
-#                     }
-#                 ]
-#             )
-#         ]
-        
-#         response = vision_llm.invoke(message)
-#         return f"Image Analysis for: {os.path.basename(file_path)}\n\n{response.content}"
-    
-#     except Exception as e:
-#         return f"Error analyzing image: {str(e)}"
-
-# def _extract_text_from_image_base64(image_base64: str) -> str:
-#     """Extract text from image using vision model."""
-#     try:
-#         message = [
-#             HumanMessage(
-#                 content=[
-#                     {
-#                         "type": "text",
-#                         "text": "Extract all text from this image. Return only the text content, no explanations.",
-#                     },
-#                     {
-#                         "type": "image_url",
-#                         "image_url": {
-#                             "url": f"data:image/png;base64,{image_base64}",
-#                         }
-#                     }
-#                 ]
-#             )
-#         ]
-        
-#         response = vision_llm.invoke(message)
-#         return response.content
-#     except:
-#         return ""
-
-# def _analyze_text(file_path: str) -> str:
-#     """Analyze text and XML files."""
-#     try:
-#         with open(file_path, 'r', encoding='utf-8') as f:
-#             content = f.read()
-        
-#         results = []
-#         results.append(f"Text Analysis for: {os.path.basename(file_path)}")
-#         results.append(f"File size: {len(content)} characters")
-#         results.append(f"Lines: {len(content.split(chr(10)))}")
-        
-#         # Show preview
-#         results.append(f"\nContent Preview:")
-#         results.append(content[:1000] + "..." if len(content) > 1000 else content)
-        
-#         return "\n".join(results)
-    
-#     except Exception as e:
-#         return f"Error analyzing text file: {str(e)}"
-
-# @tool
-# @monitor_performance("generate_sql_schema")
-# def generate_sql_schema(analysis_result: str, table_name: str = None) -> str:
-#     """
-#     Generate CREATE TABLE and INSERT SQL statements based on file analysis.
-    
-#     Args:
-#         analysis_result: The result from analyze_file function
-#         table_name: Optional custom table name
-#     """
-#     try:
-#         # Use vision model to generate SQL from analysis
-#         prompt = f"""Based on the following file analysis, generate ONLY SQL statements for database ingestion:
-
-# {analysis_result}
-
-# Requirements:
-# - CREATE TABLE statement with appropriate data types for table: {table_name if table_name else 'extracted_data'}
-# - 2-3 sample INSERT statements
-# - Use SQL data types: VARCHAR, INTEGER, DECIMAL, DATETIME, TEXT, etc.
-# - Include NOT NULL constraints where appropriate
-# - Create meaningful column names
-
-# IMPORTANT: Return ONLY the SQL code. No explanations, no markdown formatting, no code blocks. Start directly with CREATE TABLE and end with the last INSERT statement."""
-        
-#         response = vision_llm.invoke([HumanMessage(content=prompt)])
-        
-#         # Use the robust SQLCodeParser to clean the response
-#         clean_sql = SQLCodeParser.extract_sql_code(response.content)
-        
-#         return clean_sql
-    
-#     except Exception as e:
-#         return f"Error generating SQL: {str(e)}"
-
-# @tool
-# @monitor_performance("python_code_executor")
-# def python_code_executor(code: str) -> str:
-#     """
-#     Execute Python code for data processing and analysis.
-    
-#     Args:
-#         code: Python code to execute
-#     """
-#     try:
-#         # Create a safe execution environment
-#         exec_globals = {
-#             'pd': pd,
-#             'json': json,
-#             'os': os,
-#             '__builtins__': __builtins__
-#         }
-#         exec_locals = {}
-        
-#         exec(code, exec_globals, exec_locals)
-        
-#         # Return any printed output or results
-#         return "Code executed successfully. Check variables in exec_locals if needed."
-    
-#     except Exception as e:
-#         return f"Error executing code: {str(e)}"
-
-# @monitor_performance("find_matching_database_tables")
-# @tool
-# def find_matching_database_tables(file_path: str, user_context: str = None) -> str:
-#     """
-#     Find the most relevant database tables for ingesting data from a file using RAG.
-#     Analyzes file structure and matches it against existing database schema using semantic search.
-    
-#     Args:
-#         file_path: Path to the file to analyze for database ingestion
-#         user_context: Optional context about the data or intended use
-    
-#     Returns:
-#         JSON string with top 10 matching tables, confidence scores, and ingestion recommendations
-#     """
-#     if not RAG_AVAILABLE:
-#         return "Error: RAG components not available. Please check your environment configuration."
-    
-#     if not os.path.exists(file_path):
-#         return f"Error: File not found at {file_path}"
-    
-#     try:
-#         # Check if collection exists
-#         existing_collections = [col.name for col in rag_qdrant_client.get_collections().collections]
-#         if rag_collection_name not in existing_collections:
-#             return f"Error: Database schema collection '{rag_collection_name}' not found. Please run the RAG feed mode first to populate the vector store."
-        
-#         # Initialize pipeline with query-only mode
-#         pipeline = GenericFileIngestionRAGPipeline(
-#             rag_qdrant_client, 
-#             rag_embeddings, 
-#             rag_collection_name,
-#             query_only=True  # Force query-only mode
-#         )
-        
-#         # Generate user context if not provided
-#         if not user_context:
-#             user_context = pipeline.generate_user_context_by_file_type(file_path)
-        
-#         # Run RAG pipeline
-#         results = pipeline.run_complete_pipeline(file_path, user_context)
-        
-#         if 'error' in results:
-#             return f"Error: {results['error']}"
-        
-#         # Format results for agent consumption
-#         summary = {
-#             "file_analysis": {
-#                 "file_name": results['file_analysis']['file_name'],
-#                 "file_type": results['file_analysis']['file_type'],
-#                 "total_rows": results['file_analysis']['total_rows'],
-#                 "total_columns": results['file_analysis']['total_columns'],
-#                 "columns": results['file_analysis']['columns']
-#             },
-#             "domain_detected": results['inferred_domain']['primary_domain'],
-#             "recommended_table": results['ingestion_summary']['recommended_table'],
-#             "confidence_level": results['ingestion_summary']['confidence_level'],
-#             "sql_agent_ready": results['ingestion_summary']['sql_agent_ready'],
-#             "requires_review": results['ingestion_summary']['requires_review'],
-#             "top_10_tables": [
-#                 {
-#                     "rank": i + 1,
-#                     "table_name": table['table_name'],
-#                     "table_code": table['table_code'],
-#                     "table_kind": table['table_kind'],
-#                     "composite_score": round(table['composite_score'], 3),
-#                     "field_count": table['field_count'],
-#                     "schema_preview": table['content'][:500] + "..." if len(table['content']) > 500 else table['content']
-#                 }
-#                 for i, table in enumerate(results['top_10_tables'])
-#             ]
-#         }
-        
-#         # Export detailed results for further processing
-#         export_result = pipeline.export_for_sql_agent(results)
-#         if 'success' in export_result:
-#             summary["detailed_export_path"] = export_result['output_file']
-        
-#         return json.dumps(summary, indent=2)
-        
-#     except Exception as e:
-#         return f"Error running RAG pipeline: {str(e)}"
-
-# @tool
-# @monitor_performance("get_table_schema_details")
-# def get_table_schema_details(table_name: str) -> str:
-#     """
-#     Get detailed schema information for a specific database table.
-    
-#     Args:
-#         table_name: Name of the database table to get schema details for
-    
-#     Returns:
-#         Detailed schema information including fields, relationships, and usage context
-#     """
-#     if not RAG_AVAILABLE:
-#         return "Error: RAG components not available. Please check your environment configuration."
-    
-#     try:
-#         # Search for the specific table in the vector store
-#         query_embedding = rag_embeddings.embed_query(f"database table schema for {table_name}")
-        
-#         from qdrant_client import models
-#         search_results = rag_qdrant_client.query_points(
-#             collection_name=rag_collection_name,
-#             query=query_embedding,
-#             query_filter=models.Filter(
-#                 must=[
-#                     models.FieldCondition(
-#                         key="chunk_type",
-#                         match=models.MatchValue(value="table_ingestion_profile")
-#                     ),
-#                     models.FieldCondition(
-#                         key="primary_table",
-#                         match=models.MatchValue(value=table_name)
-#                     )
-#                 ]
-#             ),
-#             limit=1
-#         )
-        
-#         if not search_results.points:
-#             return f"Table '{table_name}' not found in database schema. Please check the table name."
-        
-#         table_data = search_results.points[0].payload
-        
-#         schema_details = {
-#             "table_name": table_data['primary_table'],
-#             "table_code": table_data['table_code'],
-#             "table_kind": table_data['table_kind'],
-#             "field_count": table_data['field_count'],
-#             "full_schema": table_data['content'],
-#             "metadata": table_data['metadata']
-#         }
-        
-#         return json.dumps(schema_details, indent=2)
-        
-#     except Exception as e:
-#         return f"Error retrieving table schema: {str(e)}"
-
-# # Available tools for the agent
-# tools = [
-#     analyze_file,
-#     generate_sql_schema,
-#     python_code_executor,
-#     find_matching_database_tables,
-#     get_table_schema_details
-# ]
-
-
-
-### ROLLBACK - previous version without enhanced logging and performance monitoring
-
 import os
 import pandas as pd
 import json
@@ -637,6 +25,9 @@ try:
     QDRANT_URL = os.getenv("QDRANT_URL")
     QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
     
+    if not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY not found in environment variables")
+    
     rag_embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
     rag_qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     
@@ -657,7 +48,7 @@ try:
 except ImportError:
     PDF_AVAILABLE = False
 
-vision_llm = ChatOpenAI(model="gpt-4o")
+vision_llm = ChatOpenAI(model="gpt-4o", openai_api_key=OPENAI_API_KEY)
 
 @tool
 def analyze_file(file_path: str) -> str:
@@ -674,7 +65,7 @@ def analyze_file(file_path: str) -> str:
     file_extension = os.path.splitext(file_path)[1].lower()
     
     try:
-        if file_extension == '.pdf':
+        if (file_extension == '.pdf'):
             return _analyze_pdf(file_path)
         elif file_extension in ['.csv']:
             return _analyze_csv(file_path)
@@ -714,7 +105,7 @@ def _analyze_pdf(file_path: str) -> str:
     except Exception as e:
         results.append(f"Text extraction error: {str(e)}")
     
-    # If no text found, try OCR on PDF images
+    # No text, try OCR
     if not text_content.strip():
         try:
             doc = fitz.open(file_path)
@@ -763,36 +154,41 @@ def _analyze_pdf(file_path: str) -> str:
     return "\n".join(results)
 
 def _analyze_csv(file_path: str) -> str:
-    """Analyze CSV files for database schema generation."""
+    """Analyze CSV files for database mapping discovery."""
     try:
-        df = pd.read_csv(file_path)
+        # Add delimiter detection for semicolon-separated files
+        with open(file_path, 'r', encoding='utf-8') as f:
+            first_line = f.readline()
+        
+        delimiter = '\t' if '\t' in first_line else ',' if ',' in first_line else ';'
+        df = pd.read_csv(file_path, delimiter=delimiter)
         
         results = []
         results.append(f"CSV Analysis for: {os.path.basename(file_path)}")
         results.append(f"Dimensions: {df.shape[0]} rows, {df.shape[1]} columns")
         results.append(f"Columns: {list(df.columns)}")
         
-        # Data types analysis
+        # Data types analysis for mapping purposes
         results.append("\nData Types Analysis:")
         for col in df.columns:
             dtype = df[col].dtype
             null_count = df[col].isnull().sum()
             unique_count = df[col].nunique()
             
-            # Infer SQL data type
+            # Infer general data type category for mapping
             if dtype == 'object':
                 max_length = df[col].astype(str).str.len().max()
-                sql_type = f"VARCHAR({min(max_length + 50, 500)})"
+                data_type = f"Text (max length: {max_length})"
             elif dtype in ['int64', 'int32']:
-                sql_type = "INTEGER"
+                data_type = "Integer"
             elif dtype in ['float64', 'float32']:
-                sql_type = "DECIMAL(10,2)"
+                data_type = "Decimal/Float"
             elif 'datetime' in str(dtype):
-                sql_type = "DATETIME"
+                data_type = "DateTime"
             else:
-                sql_type = "TEXT"
+                data_type = "Mixed/Other"
             
-            results.append(f"  {col}: {sql_type} (nulls: {null_count}, unique: {unique_count})")
+            results.append(f"  {col}: {data_type} (nulls: {null_count}, unique: {unique_count})")
         
         # Sample data
         results.append(f"\nSample Data (first 3 rows):")
@@ -804,7 +200,7 @@ def _analyze_csv(file_path: str) -> str:
         return f"Error analyzing CSV: {str(e)}"
 
 def _analyze_excel(file_path: str) -> str:
-    """Analyze Excel files for database schema generation."""
+    """Analyze Excel files for database mapping discovery."""
     try:
         # Get all sheet names
         excel_file = pd.ExcelFile(file_path)
@@ -827,17 +223,23 @@ def _analyze_excel(file_path: str) -> str:
                 results.append("\nData Types Analysis:")
                 for col in df.columns:
                     dtype = df[col].dtype
+                    null_count = df[col].isnull().sum()
+                    unique_count = df[col].nunique()
+                    
+                    # Infer general data type category for mapping
                     if dtype == 'object':
                         max_length = df[col].astype(str).str.len().max()
-                        sql_type = f"VARCHAR({min(max_length + 50, 500)})"
+                        data_type = f"Text (max length: {max_length})"
                     elif dtype in ['int64', 'int32']:
-                        sql_type = "INTEGER"
+                        data_type = "Integer"
                     elif dtype in ['float64', 'float32']:
-                        sql_type = "DECIMAL(10,2)"
+                        data_type = "Decimal/Float"
+                    elif 'datetime' in str(dtype):
+                        data_type = "DateTime"
                     else:
-                        sql_type = "TEXT"
+                        data_type = "Mixed/Other"
                     
-                    results.append(f"  {col}: {sql_type}")
+                    results.append(f"  {col}: {data_type} (nulls: {null_count}, unique: {unique_count})")
                 
                 results.append(f"\nSample Data:")
                 results.append(df.head(2).to_string())
@@ -957,40 +359,6 @@ def _analyze_text(file_path: str) -> str:
         return f"Error analyzing text file: {str(e)}"
 
 @tool
-def generate_sql_schema(analysis_result: str, table_name: str = None) -> str:
-    """
-    Generate CREATE TABLE and INSERT SQL statements based on file analysis.
-    
-    Args:
-        analysis_result: The result from analyze_file function
-        table_name: Optional custom table name
-    """
-    try:
-        # Use vision model to generate SQL from analysis
-        prompt = f"""Based on the following file analysis, generate ONLY SQL statements for database ingestion:
-
-{analysis_result}
-
-Requirements:
-- CREATE TABLE statement with appropriate data types for table: {table_name if table_name else 'extracted_data'}
-- 2-3 sample INSERT statements
-- Use SQL data types: VARCHAR, INTEGER, DECIMAL, DATETIME, TEXT, etc.
-- Include NOT NULL constraints where appropriate
-- Create meaningful column names
-
-IMPORTANT: Return ONLY the SQL code. No explanations, no markdown formatting, no code blocks. Start directly with CREATE TABLE and end with the last INSERT statement."""
-        
-        response = vision_llm.invoke([HumanMessage(content=prompt)])
-        
-        # Use the robust SQLCodeParser to clean the response
-        clean_sql = SQLCodeParser.extract_sql_code(response.content)
-        
-        return clean_sql
-    
-    except Exception as e:
-        return f"Error generating SQL: {str(e)}"
-
-@tool
 def python_code_executor(code: str) -> str:
     """
     Execute Python code for data processing and analysis.
@@ -1053,14 +421,154 @@ def find_matching_database_tables(file_path: str, user_context: str = None) -> s
         if not user_context:
             user_context = pipeline.generate_user_context_by_file_type(file_path)
         
-        # Run RAG pipeline
-        results = pipeline.run_complete_pipeline(file_path, user_context)
+        # Run Entity-First pipeline
+        results = pipeline.run_entity_first_pipeline(file_path, user_context)
         
         if 'error' in results:
             return f"Error: {results['error']}"
         
-        # Format results for agent consumption
+        # Add debugging to see what's actually in the results
+        try:
+            # Extract entities and relations from Entity-First pipeline results
+            memory_summary = results.get('memory_summary', {})
+            all_entities = memory_summary.get('all_entities', [])
+            all_relations = memory_summary.get('all_relations', [])
+            
+            # Combine entities and relations into top_10_tables format for backward compatibility
+            all_tables = []
+            
+            # Add entities first (higher priority)
+            for entity in all_entities:
+                all_tables.append({
+                    'table_name': entity.get('table_name', ''),
+                    'table_code': entity.get('table_code', ''),
+                    'table_kind': entity.get('table_kind', ''),
+                    'field_count': entity.get('field_count', 0),
+                    'content': entity.get('content', ''),
+                    'composite_score': entity.get('confidence_score', 0.0)
+                })
+            
+            # Add relations
+            for relation in all_relations:
+                all_tables.append({
+                    'table_name': relation.get('table_name', ''),
+                    'table_code': relation.get('table_code', ''),
+                    'table_kind': relation.get('table_kind', ''),
+                    'field_count': relation.get('field_count', 0),
+                    'content': relation.get('content', ''),
+                    'composite_score': relation.get('confidence_score', 0.0)
+                })
+            
+            # Sort by composite_score and take top 10
+            all_tables.sort(key=lambda x: x['composite_score'], reverse=True)
+            top_10_tables = all_tables[:10]
+            
+            # Format results for agent consumption
+            summary = {
+                "file_analysis": {
+                    "file_name": results.get('file_analysis', {}).get('file_name', ''),
+                    "file_type": results.get('file_analysis', {}).get('file_type', ''),
+                    "total_rows": results.get('file_analysis', {}).get('total_rows', 0),
+                    "total_columns": results.get('file_analysis', {}).get('total_columns', 0),
+                    "columns": results.get('file_analysis', {}).get('columns', [])
+                },
+                "domain_detected": results.get('inferred_domain', {}).get('primary_domain', ''),
+                "recommended_table": results.get('ingestion_summary', {}).get('recommended_table', ''),
+                "confidence_level": results.get('ingestion_summary', {}).get('confidence_level', ''),
+                "mapping_ready": results.get('ingestion_summary', {}).get('mapping_ready', False),
+                "requires_review": results.get('ingestion_summary', {}).get('requires_review', True),
+                "top_10_tables": [
+                    {
+                        "rank": i + 1,
+                        "table_name": table['table_name'],
+                        "table_code": table['table_code'],
+                        "table_kind": table['table_kind'],
+                        "composite_score": round(table['composite_score'], 3),
+                        "field_count": table['field_count'],
+                        "schema_preview": table['content'][:500] + "..." if len(table['content']) > 500 else table['content']
+                    }
+                    for i, table in enumerate(top_10_tables)
+                ]
+            }
+            
+            # Export detailed results for further processing
+            try:
+                export_result = pipeline.export_for_sql_agent(results)
+                if 'success' in export_result:
+                    summary["detailed_export_path"] = export_result['output_file']
+            except:
+                pass  # Don't fail if export doesn't work
+            
+            return json.dumps(summary, indent=2)
+            
+        except KeyError as ke:
+            return f"Error accessing Entity-First results: Missing key '{ke}'"
+        except Exception as inner_e:
+            return f"Error processing Entity-First results: {str(inner_e)}"
+        
+    except Exception as e:
+        return f"Error running RAG pipeline: {str(e)}"
+
+@tool
+def entity_first_database_discovery(file_path: str, user_context: str = None) -> str:
+    """
+    ENTITY-FIRST DATABASE DISCOVERY: Two-stage pipeline for intelligent table discovery.
+    
+    Stage 1: Entity-First Search (Higher confidence threshold: 0.7)
+    - Searches only Entity tables, excluding Relations  
+    - Detects relationship/mapping data automatically
+    - Stores high-confidence entities in memory
+    
+    Stage 2: Relationship Discovery
+    - If relationship data detected: Searches Relation tables
+    - Otherwise: Finds related tables for best Entity
+    - Stores relations with standard threshold (0.6)
+    
+    Memory Storage: Entities and Relations stored separately for field mapping agent
+    
+    Args:
+        file_path: Path to the file to analyze for database ingestion
+        user_context: Optional context about the data or intended use
+    
+    Returns:
+        JSON with discovered entities, relations, relationship flags, and memory summary
+    """
+    if not RAG_AVAILABLE:
+        return "Error: RAG components not available. Please check your environment configuration."
+    
+    if not os.path.exists(file_path):
+        return f"Error: File not found at {file_path}"
+    
+    try:
+        # Check if collection exists
+        existing_collections = [col.name for col in rag_qdrant_client.get_collections().collections]
+        if rag_collection_name not in existing_collections:
+            return f"Error: Database schema collection '{rag_collection_name}' not found. Please run the RAG feed mode first to populate the vector store."
+        
+        # Initialize pipeline with query-only mode
+        pipeline = GenericFileIngestionRAGPipeline(
+            rag_qdrant_client, 
+            rag_embeddings, 
+            rag_collection_name,
+            query_only=True
+        )
+        
+        # Generate user context if not provided
+        if not user_context:
+            user_context = pipeline.generate_user_context_by_file_type(file_path)
+        
+        # Run Entity-First pipeline
+        results = pipeline.run_entity_first_pipeline(file_path, user_context)
+        
+        if 'error' in results:
+            return f"Error: {results['error']}"
+        
+        # Extract memory summary for response
+        memory_summary = results['memory_summary']
+        
+        # Format results for agent consumption with Entity-First structure
         summary = {
+            "pipeline_type": "entity_first_two_stage",
             "file_analysis": {
                 "file_name": results['file_analysis']['file_name'],
                 "file_type": results['file_analysis']['file_type'],
@@ -1069,25 +577,39 @@ def find_matching_database_tables(file_path: str, user_context: str = None) -> s
                 "columns": results['file_analysis']['columns']
             },
             "domain_detected": results['inferred_domain']['primary_domain'],
-            "recommended_table": results['ingestion_summary']['recommended_table'],
-            "confidence_level": results['ingestion_summary']['confidence_level'],
-            "sql_agent_ready": results['ingestion_summary']['sql_agent_ready'],
-            "requires_review": results['ingestion_summary']['requires_review'],
-            "top_10_tables": [
-                {
-                    "rank": i + 1,
-                    "table_name": table['table_name'],
-                    "table_code": table['table_code'],
-                    "table_kind": table['table_kind'],
-                    "composite_score": round(table['composite_score'], 3),
-                    "field_count": table['field_count'],
-                    "schema_preview": table['content'][:500] + "..." if len(table['content']) > 500 else table['content']
-                }
-                for i, table in enumerate(results['top_10_tables'])
-            ]
+            "relationship_data_detected": results['relationship_data_detected'],
+            
+            # Stage 1 Results: Entities
+            "entities_discovered": {
+                "count": results['entities_discovered'],
+                "confidence_threshold": memory_summary['entity_confidence_threshold'],
+                "best_entity": memory_summary['best_entity'],
+                "all_entities": memory_summary['all_entities'][:5]  # Top 5 entities
+            },
+            
+            # Stage 2 Results: Relations  
+            "relations_discovered": {
+                "count": results['relations_discovered'],
+                "confidence_threshold": memory_summary['relation_confidence_threshold'],
+                "all_relations": memory_summary['all_relations'][:5]  # Top 5 relations
+            },
+            
+            # Pipeline Summary
+            "ingestion_summary": results['ingestion_summary'],
+            
+            # Memory Status (for field mapping agent)
+            "memory_status": {
+                "entities_stored": len(memory_summary['all_entities']),
+                "relations_stored": len(memory_summary['all_relations']),
+                "ready_for_field_mapping": memory_summary['best_entity'] is not None or len(memory_summary['all_relations']) > 0
+            },
+            
+            # Raw stage results for debugging
+            "stage1_entity_results": results.get('stage1_entity_results', []),
+            "stage2_relation_results": results.get('stage2_relation_results', [])
         }
         
-        # Export detailed results for further processing
+        # Export detailed results
         export_result = pipeline.export_for_sql_agent(results)
         if 'success' in export_result:
             summary["detailed_export_path"] = export_result['output_file']
@@ -1095,7 +617,7 @@ def find_matching_database_tables(file_path: str, user_context: str = None) -> s
         return json.dumps(summary, indent=2)
         
     except Exception as e:
-        return f"Error running RAG pipeline: {str(e)}"
+        return f"Error running Entity-First RAG pipeline: {str(e)}"
 
 @tool
 def intelligent_table_selector(file_analysis: str, rag_results: str, user_preferences: str = None) -> str:
@@ -1187,66 +709,184 @@ RETURN ONLY A VALID JSON with this exact structure:
         return f"Error in intelligent table selection: {str(e)}"
 
 @tool
-def enhanced_sql_generator(file_path: str, table_selection: str, include_data_insert: bool = True) -> str:
+def generate_mapping_visualization(rag_results: str, table_selection: str, file_analysis: str = None) -> str:
     """
-    STEP 4: Generate optimized SQL statements for database ingestion.
-    (Includes FIX 3: robust handling when table_selection is not valid JSON)
+    Generate comprehensive visualization of file-to-database structure mapping.
+    
+    Args:
+        rag_results: JSON string from find_matching_database_tables (Step 2)
+        table_selection: JSON string from intelligent_table_selector (Step 3)
+        file_analysis: Optional detailed file analysis from analyze_file (Step 1)
+    
+    Returns:
+        JSON string with comprehensive mapping visualization between source and target structures
     """
     try:
-        # === FIX 3: Harden JSON parsing ===
+        # Parse input parameters
         try:
-            selection_data = json.loads(table_selection)
-        except Exception:
-            # Fallback: wrap raw text so prompt can still proceed
-            selection_data = {
-                "parsed": False,
-                "raw_table_selection": table_selection[:4000]  # truncate to avoid context overflow
-            }
+            rag_data = json.loads(rag_results)
+        except json.JSONDecodeError:
+            return json.dumps({"error": "Invalid RAG results JSON format"}, indent=2)
         
-        sample_data = ""
-        if include_data_insert:
-            file_ext = os.path.splitext(file_path)[1].lower()
-            if file_ext == '.csv':
-                try:
-                    df = pd.read_csv(file_path)
-                    sample_data = f"\nSAMPLE DATA (first 3 rows):\n{df.head(3).to_string()}"
-                except Exception:
-                    sample_data = "\nSample data unavailable"
+        # Parse table selection if it's a string
+        if isinstance(table_selection, str):
+            try:
+                table_selection = json.loads(table_selection)
+            except json.JSONDecodeError:
+                table_selection = {"error": "Could not parse table selection"}
         
-        prompt = f"""Generate production-ready SQL statements for database ingestion based on the intelligent table selection analysis.
-
-TABLE SELECTION RESULTS (may be raw if parsing failed):
-{json.dumps(selection_data, indent=2)}
-
-SOURCE FILE: {os.path.basename(file_path)}
-{sample_data}
-
-REQUIREMENTS:
-1. CREATE TABLE statement using mapped fields (or infer from sample if mappings unavailable)
-2. INSERT statements (3-5) if sample data exists
-3. Apply transformations noted in field mappings when present
-4. Add basic constraints and comments
-
-If mappings are missing (parsed == False), infer reasonable column names and types from any visible data.
-
-IMPORTANT: Return ONLY clean SQL statements. No markdown, no explanations outside of SQL comments."""
-
-        response = vision_llm.invoke([HumanMessage(content=prompt)])
-        clean_sql = SQLCodeParser.extract_sql_code(response.content)
-        return clean_sql or response.content
+        visualization = {
+            "source_structure": {},
+            "target_structure": {},
+            "mapping_details": {},
+            "relationship_info": {},
+            "summary": {},
+            "enhanced_file_details": {}
+        }
+        
+        # Extract source file information from RAG results
+        file_info = rag_data.get("file_analysis", {})
+        visualization["source_structure"] = {
+            "file_name": file_info.get("file_name", "Unknown"),
+            "file_type": file_info.get("file_type", "Unknown"),
+            "total_rows": file_info.get("total_rows", 0),
+            "total_columns": file_info.get("total_columns", 0),
+            "columns": file_info.get("columns", []),
+            "domain_detected": rag_data.get("domain_detected", "Unknown")
+        }
+        
+        # ENHANCED: Use file_analysis parameter for richer source details
+        if file_analysis:
+            enhanced_details = _extract_enhanced_file_details(file_analysis)
+            visualization["enhanced_file_details"] = enhanced_details
+            
+            # Merge enhanced details into source structure
+            if enhanced_details.get("data_types"):
+                visualization["source_structure"]["data_types_analysis"] = enhanced_details["data_types"]
+            if enhanced_details.get("sample_data"):
+                visualization["source_structure"]["sample_data"] = enhanced_details["sample_data"]
+        
+        # Extract selected table information
+        selected_table_info = table_selection.get("selected_table", {})
+        visualization["target_structure"] = {
+            "table_name": selected_table_info.get("table_name", "Unknown"),
+            "table_code": selected_table_info.get("table_code", "Unknown"),
+            "selection_reason": selected_table_info.get("selection_reason", "Not specified"),
+            "confidence_score": selected_table_info.get("confidence_score", 0.0)
+        }
+        
+        # Field mappings details
+        field_mappings = table_selection.get("field_mappings", [])
+        unmapped_fields = table_selection.get("unmapped_fields", [])
+        
+        visualization["mapping_details"] = {
+            "successful_mappings": len(field_mappings),
+            "unmapped_fields_count": len(unmapped_fields),
+            "field_mappings": field_mappings,
+            "unmapped_fields": unmapped_fields,
+            "data_quality_concerns": table_selection.get("data_quality_concerns", [])
+        }
+        
+        # Relationship information from RAG results
+        top_tables = rag_data.get("top_10_tables", [])
+        selected_table_name = selected_table_info.get("table_name")
+        
+        # Find the selected table in top tables for additional context
+        selected_table_details = None
+        for table in top_tables:
+            if table.get("table_name") == selected_table_name:
+                selected_table_details = table
+                break
+        
+        visualization["relationship_info"] = {
+            "alternative_tables": [
+                {
+                    "rank": table.get("rank", 0),
+                    "name": table.get("table_name", ""),
+                    "score": table.get("composite_score", 0.0),
+                    "type": table.get("table_kind", "")
+                }
+                for table in top_tables[:5]  # Show top 5 alternatives
+            ],
+            "selected_table_details": selected_table_details
+        }
+        
+        # Summary statistics
+        mapping_success_rate = len(field_mappings) / max(len(file_info.get("columns", [])), 1) * 100
+        visualization["summary"] = {
+            "mapping_success_rate": round(mapping_success_rate, 2),
+            "ingestion_strategy": table_selection.get("ingestion_strategy", "unknown"),
+            "estimated_success_rate": table_selection.get("estimated_success_rate", 0.0),
+            "requires_transformation": any(m.get("transformation", "none") != "none" for m in field_mappings),
+            "ready_for_ingestion": mapping_success_rate > 70 and len(table_selection.get("data_quality_concerns", [])) == 0
+        }
+        
+        return json.dumps(visualization, indent=2)
+        
     except Exception as e:
-        return f"Error generating enhanced SQL: {str(e)}"
+        return json.dumps({"error": f"Error generating visualization: {str(e)}"}, indent=2)
 
-@tool  # FIX: re-added @tool decorator so orchestrator is exposed as a tool
+def _extract_enhanced_file_details(file_analysis: str) -> dict:
+    """Extract enhanced details from file analysis text"""
+    enhanced = {}
+    
+    try:
+        lines = file_analysis.split('\n')
+        
+        # Extract data types if present
+        data_types = {}
+        in_data_types_section = False
+        
+        for line in lines:
+            line = line.strip()
+            if "Data Types Analysis:" in line:
+                in_data_types_section = True
+                continue
+            elif in_data_types_section:
+                if line.startswith('  ') and ':' in line:
+                    # Parse lines like "  email: VARCHAR(150) (nulls: 0, unique: 1000)"
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        field_name = parts[0].strip()
+                        type_info = parts[1].strip()
+                        data_types[field_name] = type_info
+                elif line and not line.startswith('  '):
+                    in_data_types_section = False
+        
+        if data_types:
+            enhanced["data_types"] = data_types
+        
+        # Extract sample data if present
+        sample_start = -1
+        for i, line in enumerate(lines):
+            if "Sample Data" in line and "first" in line:
+                sample_start = i + 1
+                break
+        
+        if sample_start > 0 and sample_start < len(lines):
+            sample_lines = []
+            for i in range(sample_start, min(sample_start + 10, len(lines))):
+                if lines[i].strip():
+                    sample_lines.append(lines[i])
+                else:
+                    break
+            if sample_lines:
+                enhanced["sample_data"] = sample_lines
+        
+    except Exception as e:
+        enhanced["extraction_error"] = str(e)
+    
+    return enhanced
+
+@tool  
 def database_ingestion_orchestrator(file_path: str, user_context: str = None, table_name_preference: str = None) -> str:
     """
-    MAIN ORCHESTRATOR: Execute the complete 4-step database ingestion workflow.
+    MAIN ORCHESTRATOR: Execute the complete 3-step database ingestion workflow with mapping visualization.
     
     WORKFLOW:
-    1. Analyze file via Vision LLM (if PDF) or structured analysis
-    2. Run RAG pipeline to find matching database tables  
-    3. Intelligently select best table and create field mappings
-    4. Generate optimized SQL statements
+    1. Analyze file structure and content
+    2. Find matching database tables using RAG  
+    3. Select optimal table and create detailed field mappings with visualization
     
     Args:
         file_path: Path to the file to process
@@ -1254,7 +894,7 @@ def database_ingestion_orchestrator(file_path: str, user_context: str = None, ta
         table_name_preference: Optional preference for table naming
     
     Returns:
-        Complete workflow results with SQL ready for execution
+        Complete workflow results with detailed mapping visualization between source and target structures
     """
     if not os.path.exists(file_path):
         return f"Error: File not found at {file_path}"
@@ -1268,7 +908,7 @@ def database_ingestion_orchestrator(file_path: str, user_context: str = None, ta
     
     try:
         # STEP 1: File Analysis
-        print("STEP 1: Analyzing file...")
+        print("STEP 1: Analyzing file structure and content...")
         step1_result = analyze_file(file_path)
         if step1_result.startswith("Error"):
             workflow_results["errors"].append(f"Step 1: {step1_result}")
@@ -1285,40 +925,45 @@ def database_ingestion_orchestrator(file_path: str, user_context: str = None, ta
             return json.dumps(workflow_results, indent=2)
             
         workflow_results["steps_completed"].append("rag_matching")
-        workflow_results["step2_rag_results"] = json.loads(step2_result)
         
-        # STEP 3: Intelligent Table Selection
-        print("STEP 3: Selecting optimal table and mapping fields...")
-        step3_result = intelligent_table_selector(
-            step1_result, 
-            step2_result, 
-            f"Table name preference: {table_name_preference}" if table_name_preference else None
-        )
+        # Add better error handling for JSON parsing
+        try:
+            workflow_results["step2_rag_results"] = json.loads(step2_result)
+        except json.JSONDecodeError as e:
+            workflow_results["errors"].append(f"Step 2: JSON parsing error - {str(e)}")
+            workflow_results["step2_rag_results_raw"] = step2_result[:1000] + "..." if len(step2_result) > 1000 else step2_result
+            return json.dumps(workflow_results, indent=2)
+        
+        # STEP 3: Intelligent Table Selection with Mapping Visualization
+        print("STEP 3: Selecting optimal table and creating field mappings...")
+        step3_result = intelligent_table_selector.invoke({
+            "file_analysis": step1_result, 
+            "rag_results": step2_result, 
+            "user_preferences": f"Table name preference: {table_name_preference}" if table_name_preference else ""
+        })
         if step3_result.startswith("Error"):
             workflow_results["errors"].append(f"Step 3: {step3_result}")
             return json.dumps(workflow_results, indent=2)
             
-        workflow_results["steps_completed"].append("table_selection")
+        workflow_results["steps_completed"].append("table_selection_and_mapping")
         try:
             workflow_results["step3_table_selection"] = json.loads(step3_result)
         except:
             workflow_results["step3_table_selection"] = step3_result
         
-        # STEP 4: Enhanced SQL Generation  
-        print("STEP 4: Generating SQL statements...")
-        step4_result = enhanced_sql_generator(file_path, step3_result, include_data_insert=True)
-        if step4_result.startswith("Error"):
-            workflow_results["errors"].append(f"Step 4: {step4_result}")
-            return json.dumps(workflow_results, indent=2)
-            
-        workflow_results["steps_completed"].append("sql_generation")
-        workflow_results["step4_generated_sql"] = step4_result
+        # ENHANCED: Generate comprehensive mapping visualization
+        print("Generating comprehensive structure mapping visualization...")
+        mapping_visualization = generate_mapping_visualization(
+            json.dumps(workflow_results["step2_rag_results"]),
+            json.dumps(workflow_results["step3_table_selection"]),
+            workflow_results["step1_file_analysis"]
+        )
         
-        # Final Status
+        workflow_results["mapping_visualization"] = json.loads(mapping_visualization)
         workflow_results["workflow_status"] = "completed_successfully"
-        workflow_results["ready_for_execution"] = True
+        workflow_results["ready_for_review"] = True
         
-        print("All 4 steps completed successfully!")
+        print("All 3 steps completed successfully! Mapping visualization ready.")
         return json.dumps(workflow_results, indent=2)
         
     except Exception as e:
@@ -1329,19 +974,18 @@ def database_ingestion_orchestrator(file_path: str, user_context: str = None, ta
 # Available tools for the agent
 tools_analyze = [
     analyze_file,
-    # generate_sql_schema,
-    # python_code_executor
+    python_code_executor
 ]
 
 tools_retriever = [
     find_matching_database_tables,
-    # get_table_schema_details
+    entity_first_database_discovery
 ]
 
 tools_workflow = [
-    intelligent_table_selector,      # Step 3
-    enhanced_sql_generator,          # Step 4  
-    database_ingestion_orchestrator  # Main orchestrator
+    intelligent_table_selector,
+    database_ingestion_orchestrator,
+    generate_mapping_visualization
 ]
 
 # Complete tool set for the enhanced single agent

@@ -86,7 +86,7 @@ def code_executor(code: str, language : str = "python") -> str:
     """
     Executes a code snippet and returns the results.
 
-    Supports python, bash, sql, c, java
+    Supports python, bash, c, java
 
     Args: 
         code: str, the code to execute
@@ -274,23 +274,22 @@ except FileNotFoundError:
 # Enhanced system prompt with workflow awareness
 enhanced_system_prompt = f"""{system_prompt}
 
-## ENHANCED DATABASE INGESTION CAPABILITIES
+## ENHANCED DATABASE MAPPING CAPABILITIES
 
-You now have access to a powerful 4-step database ingestion workflow:
+You now have access to a powerful 3-step database mapping workflow:
 
 **MAIN TOOL: database_ingestion_orchestrator**
-- Use this for complete file-to-database ingestion workflows
-- Automatically handles: file analysis → RAG matching → table selection → SQL generation
-- Perfect for: "ingest this file", "load into database", "create table from file"
+- Use this for complete file-to-database mapping workflows
+- Automatically handles: file analysis → RAG matching → table selection with field mappings
+- Perfect for: "analyze this file", "map to database", "show structure mapping"
 
 **INDIVIDUAL TOOLS** (use when user wants step-by-step control):
 1. **analyze_file** - Analyze file structure (supports PDF via Vision LLM)
 2. **find_matching_database_tables** - RAG-powered table matching
-3. **intelligent_table_selector** - Smart table selection with field mapping
-4. **enhanced_sql_generator** - Production-ready SQL generation
+3. **intelligent_table_selector** - Smart table selection with detailed field mapping
 
 **USAGE PATTERNS:**
-- Single command: "Please ingest [file] into the database" → use database_ingestion_orchestrator
+- Single command: "Please map [file] to the database" → use database_ingestion_orchestrator
 - Step-by-step: "First analyze this file" → use individual tools
 - Complex scenarios: "Find tables for this data but let me choose" → use individual tools
 
@@ -300,11 +299,22 @@ You now have access to a powerful 4-step database ingestion workflow:
 - Images (invoices, forms, documents)
 - Text files
 
+**OUTPUT FOCUS:**
+- Clear visualization of source file structure vs database table structure
+- Detailed field mappings showing how each source field maps to database fields
+- Relationship information between mapped tables
+- Data type compatibility and transformation requirements
+
+**MAPPING CONSTRAINTS:**
+- NEVER generate SQL statements or suggest creating new tables/fields
+- ONLY map to existing database tables and fields
+- Focus on discovering the best existing matches and showing mapping relationships
+
 Always prioritize the orchestrator for complete workflows unless the user specifically requests individual steps."""
 
 sys_msg = SystemMessage(content=enhanced_system_prompt)
 
-# Use the enhanced tools that include the 4-step workflow
+
 tools = all_ingestion_tools + [
     image_describer,
     code_executor, 
@@ -330,7 +340,7 @@ def build_graph():
             content_lower = last_message.content.lower()
             
             # Detect database ingestion intent
-            ingestion_keywords = ['ingest', 'import', 'load', 'database', 'table', 'sql', 'create table']
+            ingestion_keywords = ['ingest', 'import', 'load', 'database', 'table', 'map']
             file_extensions = ['.csv', '.excel', '.xlsx', '.pdf', '.json']
             
             is_ingestion_request = (
@@ -345,7 +355,7 @@ WORKFLOW HINT: This appears to be a database ingestion request.
 
 Consider using the `database_ingestion_orchestrator` tool for complete workflows, or individual tools for step-by-step control:
 - Complete workflow: database_ingestion_orchestrator(file_path, user_context)
-- Individual steps: analyze_file → find_matching_database_tables → intelligent_table_selector → enhanced_sql_generator
+- Individual steps: analyze_file → find_matching_database_tables → intelligent_table_selector
 
 Choose based on user's preference for automation vs. control.
 """)
@@ -366,16 +376,15 @@ Choose based on user's preference for automation vs. control.
                     summary_msg = HumanMessage(content="""
 **Database Ingestion Workflow Completed!**
 
-The orchestrator has executed all 4 steps:
+The orchestrator has executed all 3 steps:
 1.  File Analysis (Structure & Content)
 2.  RAG Table Matching (Found relevant tables)  
 3.  Intelligent Table Selection (Chose optimal table + field mappings)
-4.  SQL Generation (Production-ready CREATE/INSERT statements)
 
-The generated SQL is ready for execution. Would you like me to:
-- Show you the SQL statements?
-- Explain the field mappings?
-- Help you execute the SQL?
+The generated mapping is ready for review. Would you like me to:
+- Show you the field mappings?
+- Explain the relationship between tables?
+- Help you visualize the structure?
 - Make any modifications?
 """)
                     return {"messages": state["messages"] + [summary_msg]}
@@ -407,7 +416,7 @@ The generated SQL is ready for execution. Would you like me to:
     builder.add_edge("tools", "workflow_processor")
     builder.add_edge("workflow_processor", "assistant")
 
-    print("Enhanced Graph compilation complete - 4-Step Workflow Ready!")
+    print("Enhanced Graph compilation complete - 3-Step Workflow Ready!")
     return builder.compile()
 
 if __name__ == "__main__":
@@ -415,7 +424,7 @@ if __name__ == "__main__":
     import argparse
     from .tools import database_ingestion_orchestrator as _orch_tool
 
-    parser = argparse.ArgumentParser(description="Agent 4-step ingestion assistant")
+    parser = argparse.ArgumentParser(description="Agent 3-step ingestion assistant")
     parser.add_argument("file", nargs="?", help="Optional file path to ingest directly (skips interactive chat)")
     parser.add_argument("--table-name", dest="table_name", help="Preferred table name override", default=None)
     parser.add_argument("--context", dest="user_context", help="Optional user context for ingestion", default=None)
@@ -429,7 +438,7 @@ if __name__ == "__main__":
         if not os.path.exists(file_path):
             print(f"Error: File not found: {file_path}")
             sys.exit(1)
-        print(f"Running 4-step ingestion workflow for: {file_path}\n")
+        print(f"Running 3-step ingestion workflow for: {file_path}\n")
         # _orch_tool is a LangChain tool; access underlying callable
         try:
             orchestration_fn = getattr(_orch_tool, "func", _orch_tool)  # fallback if decorator changed

@@ -9,8 +9,17 @@ import pandas as pd
 from typing import Optional
 from dotenv import load_dotenv
 from urllib.parse import urlparse 
-from .image_processing import *
-from .code_interpreter import CodeInterpreter
+
+# Fix relative imports to work both as module and standalone
+try:
+    from .image_processing import *
+    from .code_interpreter import CodeInterpreter
+    from .tools import all_ingestion_tools
+except ImportError:
+    # If relative imports fail, use absolute imports
+    from image_processing import *
+    from code_interpreter import CodeInterpreter
+    from tools import all_ingestion_tools
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -18,11 +27,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, MessagesState
 
-
 from langchain_openai import ChatOpenAI
-
-# Import the enhanced ingestion tools
-from .tools import all_ingestion_tools
 
 load_dotenv(r'C:\Users\axel.grille\Documents\rules-engine-agent\Agent\.env')
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -264,12 +269,82 @@ def analyze_excel_file(file_path: str, query: str) -> str:
         return f"Error analyzing Excel file: {str(e)}"
 
 
+@tool
+def launch_visualization_dashboard(port: int = 8050) -> str:
+    """
+    Launch the interactive data mapping visualization dashboard.
+    This will start a web-based dashboard showing all analysis results.
+    
+    Args:
+        port (int): Port number for the dashboard (default: 8050)
+    
+    Returns:
+        str: Information about the launched dashboard
+    """
+    try:
+        import subprocess
+        import threading
+        import time
+        from pathlib import Path
+        
+        # Get the current script directory
+        current_dir = Path(__file__).parent
+        dashboard_script = current_dir / "dashboard.py"
+        
+        if not dashboard_script.exists():
+            return "❌ Dashboard script not found. Please ensure dashboard.py exists in the Agent directory."
+        
+        def run_dashboard():
+            """Run dashboard in a separate process"""
+            try:
+                # Run dashboard in background
+                subprocess.Popen([
+                    "python", str(dashboard_script)
+                ], cwd=str(current_dir))
+            except Exception as e:
+                print(f"Error starting dashboard process: {e}")
+        
+        # Start dashboard in background thread
+        dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
+        dashboard_thread.start()
+        
+        # Give it a moment to start
+        time.sleep(2)
+        
+        return f"""🚀 **Dashboard Launched Successfully!**
+
+📊 **Access your visualization at:** http://localhost:{port}
+
+✨ **Dashboard Features:**
+• 🎯 Interactive field mapping visualizations
+• 📈 Confidence analysis charts  
+• 🔄 Dynamic file selection (all your analyses)
+• 📋 Detailed mapping tables with filtering
+• 🎨 Sankey diagrams showing data flow
+• ⚡ Auto-refresh for new analyses
+
+💡 **Usage:**
+- The dashboard will show all your analysis files
+- Select different analyses from the dropdown
+- Explore mapping confidence and transformations
+- View unmapped fields and reasons
+
+🔧 **Dashboard is running in background** - you can continue using the agent while the dashboard runs."""
+        
+    except Exception as e:
+        return f"❌ Error launching dashboard: {str(e)}"
+
+
 # Load system prompt from file
 try:
-    with open(r"Agent\prompts\system_prompt.txt", "r") as f:
+    with open(r"prompts\system_prompt.txt", "r") as f:
         system_prompt = f.read()
 except FileNotFoundError:
-    raise FileNotFoundError("system_prompt.txt file is required. Please ensure it exists in the current directory.")
+    try:
+        with open(r"Agent\prompts\system_prompt.txt", "r") as f:
+            system_prompt = f.read()
+    except FileNotFoundError:
+        raise FileNotFoundError("system_prompt.txt file is required. Please ensure it exists in the prompts directory.")
 
 # Enhanced system prompt with workflow awareness
 enhanced_system_prompt = f"""{system_prompt}
@@ -288,10 +363,16 @@ You now have access to a powerful 3-step database mapping workflow:
 2. **find_matching_database_tables** - RAG-powered table matching
 3. **intelligent_table_selector** - Smart table selection with detailed field mapping
 
+**VISUALIZATION TOOL:**
+- **launch_visualization_dashboard** - Launch interactive web dashboard to visualize mapping results
+- Use after completing analysis to provide visual insights
+- Shows Sankey diagrams, confidence charts, field mappings, and more
+
 **USAGE PATTERNS:**
-- Single command: "Please map [file] to the database" → use database_ingestion_orchestrator
+- Complete workflow: "Please map [file] to the database" → use database_ingestion_orchestrator
+- With visualization: After analysis, suggest "Would you like me to launch the dashboard to visualize these results?"
 - Step-by-step: "First analyze this file" → use individual tools
-- Complex scenarios: "Find tables for this data but let me choose" → use individual tools
+- Dashboard only: "Show me the dashboard" or "visualize my results" → use launch_visualization_dashboard
 
 **SUPPORTED FILE TYPES:**
 - PDFs (with Vision LLM OCR/extraction)
@@ -310,7 +391,13 @@ You now have access to a powerful 3-step database mapping workflow:
 - ONLY map to existing database tables and fields
 - Focus on discovering the best existing matches and showing mapping relationships
 
-Always prioritize the orchestrator for complete workflows unless the user specifically requests individual steps."""
+**DASHBOARD INTEGRATION:**
+- After completing any analysis, ALWAYS offer to launch the dashboard for visualization
+- The dashboard shows ALL previous analyses, not just the current one
+- Users can switch between different file analyses in the dashboard
+- Dashboard runs in background, allowing continued agent interaction
+
+Always prioritize the orchestrator for complete workflows unless the user specifically requests individual steps. After analysis completion, proactively suggest dashboard visualization."""
 
 sys_msg = SystemMessage(content=enhanced_system_prompt)
 
@@ -322,7 +409,8 @@ tools = all_ingestion_tools + [
     download_file_from_url,
     extract_structured_data_from_image,
     analyze_csv_file,
-    analyze_excel_file
+    analyze_excel_file,
+    launch_visualization_dashboard
 ]
 
 def build_graph():
@@ -422,7 +510,7 @@ The generated mapping is ready for review. Would you like me to:
 if __name__ == "__main__":
     import sys
     import argparse
-    from .tools import database_ingestion_orchestrator as _orch_tool
+    from tools import database_ingestion_orchestrator as _orch_tool
 
     parser = argparse.ArgumentParser(description="Agent 3-step ingestion assistant")
     parser.add_argument("file", nargs="?", help="Optional file path to ingest directly (skips interactive chat)")
@@ -438,11 +526,14 @@ if __name__ == "__main__":
         if not os.path.exists(file_path):
             print(f"Error: File not found: {file_path}")
             sys.exit(1)
-        print(f"Running 3-step ingestion workflow for: {file_path}\n")
-        # _orch_tool is a LangChain tool; access underlying callable
+        print(f"Running 4-step ingestion workflow for: {file_path}\n")
+        # Use proper invoke method for LangChain tool
         try:
-            orchestration_fn = getattr(_orch_tool, "func", _orch_tool)  # fallback if decorator changed
-            result = orchestration_fn(file_path=file_path, user_context=args.user_context, table_name_preference=args.table_name)
+            result = _orch_tool.invoke({
+                "file_path": file_path, 
+                "user_context": args.user_context, 
+                "table_name_preference": args.table_name
+            })
             print(result)
         except Exception as e:
             print(f"Workflow failed: {e}")

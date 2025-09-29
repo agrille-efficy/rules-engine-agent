@@ -110,6 +110,12 @@ class WorkflowFileProcessor:
             orch = database_ingestion_orchestrator
             if hasattr(orch, 'func'):  # LangChain tool wrapper
                 return orch.func(file_path=path, user_context=ctx, table_name_preference=tbl_pref)
+            elif hasattr(orch, 'invoke'):  # Use invoke method
+                return orch.invoke({
+                    "file_path": path, 
+                    "user_context": ctx, 
+                    "table_name_preference": tbl_pref
+                })
             return orch(path, ctx, tbl_pref)
         try:
             if not os.path.exists(file_path):

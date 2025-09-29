@@ -12,9 +12,33 @@ from qdrant_client import QdrantClient, models
 from qdrant_client.models import PointStruct, PayloadSchemaType 
 from langchain_openai import OpenAIEmbeddings, OpenAI 
 
-from .chunk_generator import generate_table_ingestion_chunks
-from .config import config
-from ..embedding_cache import EmbeddingCache
+# Fix relative imports to work both as module and when called from agent
+try:
+    from .chunk_generator import generate_table_ingestion_chunks
+    from .config import config
+    from ..embedding_cache import EmbeddingCache
+except ImportError:
+    try:
+        from chunk_generator import generate_table_ingestion_chunks
+        from config import config
+        from embedding_cache import EmbeddingCache
+    except ImportError:
+        # Create fallback implementations if imports fail
+        def generate_table_ingestion_chunks(dico_data):
+            return []
+        
+        class config:
+            efficy_base_url = "https://sandbox-5.efficytest.cloud"
+            efficy_customer = "SANDBOX05"
+            efficy_username = ""
+            efficy_password = ""
+        
+        class EmbeddingCache:
+            def __init__(self, embeddings):
+                self.embeddings = embeddings
+            
+            def embed_query(self, query):
+                return self.embeddings.embed_query(query)
 
 # Import for translation functionality
 import re

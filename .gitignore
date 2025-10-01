@@ -1,4 +1,29 @@
+# Environment files
 Agent/.env
+.env
+
+# Python cache files
 *.pyc
 __pycache__/
-Agent/__pycache__/agent.cpython-313.pyc
+
+# Virtual environment
+.venv/
+venv/
+
+
+# Gradio files
+.gradio/
+Agent/.gradio/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# In devlopment for PoC
+Agent/RAG/vector_store/
+*.json
+Agent/test.ipynb
+Agent/Agent/RAG/vector_store/index.faiss
+Agent/Agent/RAG/vector_store/index.pkl
+
+*.csv

@@ -24,3 +24,9 @@ def save_image(image: Image.Image, directory: str = "image_outputs") -> str:
     image_path = os.path.join(directory, f"{image_id}.png")
     image.save(image_path)
     return image_path
+
+def load_local_image(image_path: str) -> Image.Image:
+    """Load an image from a local file path."""
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Image file not found: {image_path}")
+    return Image.open(image_path)

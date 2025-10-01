@@ -668,10 +668,10 @@ def start_dashboard(port=8050, debug=True):
     """Start the dashboard server"""
     files = dashboard.get_available_analysis_files()
     
-    print("🚀 Starting Dynamic Data Mapping Dashboard...")
-    print(f"📊 Dashboard available at: http://localhost:{port}")
-    print(f"📁 Monitoring directory: {dashboard.results_dir}")
-    print(f"📋 Found {len(files)} analysis files:")
+    print("Starting Dynamic Data Mapping Dashboard...")
+    print(f"Dashboard available at: http://localhost:{port}")
+    print(f"Monitoring directory: {dashboard.results_dir}")
+    print(f"Found {len(files)} analysis files:")
     
     for file_info in files[:5]:  # Show first 5
         print(f"   • {file_info['source_file']} ({file_info['modified_time'].strftime('%Y-%m-%d %H:%M')})")
@@ -680,12 +680,12 @@ def start_dashboard(port=8050, debug=True):
         print(f"   ... and {len(files) - 5} more files")
     
     if not files:
-        print("⚠️  No analysis files found. Run the agent on some data files first!")
+        print("No analysis files found. Run the agent on some data files first!")
     
-    print("\n💡 Dashboard features:")
-    print("   • Select any analysis file from dropdown")
-    print("   • Auto-refreshes every 30 seconds for new analyses")
-    print("   • Click 'Refresh Files' button for immediate update")
+    print("\nDashboard features:")
+    print("Select any analysis file from dropdown")
+    print("Auto-refreshes every 30 seconds for new analyses")
+    print("Click 'Refresh Files' button for immediate update")
     
     app.run_server(debug=debug, port=port)
 

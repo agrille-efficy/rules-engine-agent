@@ -1,31 +1,25 @@
-import base64 
+import base64
 import os
 import requests
 import uuid
 import tempfile
+import json
+import argparse
+from typing import Optional, Literal
 
 import pandas as pd
 
-from typing import Optional
 from dotenv import load_dotenv
-from urllib.parse import urlparse 
+from urllib.parse import urlparse
 
-# Fix relative imports to work both as module and standalone
-try:
-    from .image_processing import *
-    from .code_interpreter import CodeInterpreter
-    from .tools import all_ingestion_tools
-except ImportError:
-    # If relative imports fail, use absolute imports
-    from image_processing import *
-    from code_interpreter import CodeInterpreter
-    from tools import all_ingestion_tools
+from image_processing import encode_image, load_local_image
+from code_interpreter import CodeInterpreter
 
 from langchain_core.tools import tool
-from langgraph.prebuilt import ToolNode, tools_condition
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.graph import StateGraph, START, MessagesState
+from langchain_core.messages import HumanMessage
+from langgraph.graph import StateGraph, START, END
+from typing_extensions import TypedDict
 
 from langchain_openai import ChatOpenAI
 
@@ -35,34 +29,56 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable is required")
 
-# Vision model for image processing
-vision_llm = ChatOpenAI(temperature=0) 
+vision_llm = ChatOpenAI(model="gpt-4o", temperature=0)
+
+
+class WorkflowState(TypedDict, total=False):
+    messages: list
+    file_path: str
+    user_context: Optional[str]
+    table_preference: Optional[str]
+    user_preferences: Optional[str]
+
+    file_analysis_result: Optional[str]
+    rag_results: Optional[dict]
+    selected_table: Optional[dict]
+    validation_result: Optional[dict]
+
+    workflow_step: str
+    validation_status: Optional[str]
+    refinement_attempts: int
+    max_refinements: int
+    workflow_status: str
+    errors: list
+    last_error: Optional[str]
+    steps_completed: list
+    refinement_history: list
 
 
 @tool
 def image_describer(image_url: str) -> str:
     """Describes the content of an image."""
-
     description = ""
-
     try:
-        import requests 
         response = requests.get(image_url)
         image_bytes = response.content
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-
         message = [
             HumanMessage(
                 content=[
                     {
-                    "type": "text",
-                    "text": (
-                        "Describe the type of image you see, if it is a photo, a drawing, a painting, etc. "
-                        "Then describe the content of the image in the most detailled way possible. "
-                        "You will start by describing the front of the image, then the back of the image if possible. "
-                        "If the image contains text, you will extract it and describe it in the most detailler way possible. "
-                        "If the image is a document, you will extract the text. Return only the text in this case, no explanations."
-                        
+                        "type": "text",
+                        "text": (
+                            "Describe the type of image you see, "
+                            "if it is a photo, a drawing, a painting, etc. "
+                            "Then describe the content of the image "
+                            "in the most detailed way possible. "
+                            "You will start by describing the front of the "
+                            "image, then the back of the image if possible. "
+                            "If the image contains text, you will extract it "
+                            "and describe it in the most detailed way possible. "
+                            "If the image is a document, you will extract the text. "
+                            "Return only the text in this case, no explanations."
                         ),
                     },
                     {
@@ -74,31 +90,26 @@ def image_describer(image_url: str) -> str:
                 ]
             )
         ]
-
-        # call the vision model
         response = vision_llm.invoke(message)
         description += response.content + "\n\n"
-
         return description.strip()
-
     except Exception as e:
         print(f"Error reading image file: {e}")
         return "Error reading image file."
 
 
-@tool 
-def code_executor(code: str, language : str = "python") -> str: 
+@tool
+def code_executor(code: str, language: str = "python") -> str:
     """
     Executes a code snippet and returns the results.
-
     Supports python, bash, c, java
-
-    Args: 
+    Args:
         code: str, the code to execute
-        language: str, the programming language of the code snippet (python by default)
-
-    Returns: 
-        str: the result of the code execution or an error message if execution fails.
+        language: str, the programming language of the code snippet
+            (python by default)
+    Returns:
+        str: the result of the code execution or an error message if
+        execution fails.
     """
     try:
         interpreter = CodeInterpreter()
@@ -107,13 +118,17 @@ def code_executor(code: str, language : str = "python") -> str:
     except Exception as e:
         return f"Error executing code: {str(e)}"
 
+
 @tool
-def save_and_read_file(content: str, filename: Optional[str] = None) -> str:
+def save_and_read_file(
+    content: str, filename: Optional[str] = None
+) -> str:
     """
     Save content to a file and return the path.
     Args:
         content (str): the content to save to the file
-        filename (str, optional): the name of the file. If not provided, a random name file will be created.
+        filename (str, optional): the name of the file.
+        If not provided, a random name file will be created.
     """
     temp_dir = tempfile.gettempdir()
     if filename is None:
@@ -121,20 +136,24 @@ def save_and_read_file(content: str, filename: Optional[str] = None) -> str:
         filepath = temp_file.name
     else:
         filepath = os.path.join(temp_dir, filename)
-
     with open(filepath, "w") as f:
         f.write(content)
-
-    return f"File saved to {filepath}. You can read this file to process its contents."
+    return (
+        f"File saved to {filepath}. You can read this file to process its "
+        f"contents."
+    )
 
 
 @tool
-def download_file_from_url(url: str, filename: Optional[str] = None) -> str:
+def download_file_from_url(
+    url: str, filename: Optional[str] = None
+) -> str:
     """
     Download a file from a URL and save it to a temporary location.
     Args:
         url (str): the URL of the file to download.
-        filename (str, optional): the name of the file. If not provided, a random name file will be created.
+        filename (str, optional): the name of the file. If not provided,
+            a random name file will be created.
     """
     try:
         # Parse URL to get filename if not provided
@@ -143,76 +162,73 @@ def download_file_from_url(url: str, filename: Optional[str] = None) -> str:
             filename = os.path.basename(path)
             if not filename:
                 filename = f"downloaded_{uuid.uuid4().hex[:8]}"
-
-        # Create temporary file
         temp_dir = tempfile.gettempdir()
         filepath = os.path.join(temp_dir, filename)
-
-        # Download the file
         response = requests.get(url, stream=True)
         response.raise_for_status()
-
-        # Save the file
         with open(filepath, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-
-        return f"File downloaded to {filepath}. You can read this file to process its contents."
+        return (
+            f"File downloaded to {filepath}. You can read this file to "
+            f"process its contents."
+        )
     except Exception as e:
         return f"Error downloading file: {str(e)}"
 
+
 @tool
-def extract_structured_data_from_image(image_path: str, schema_context: str) -> str:
+def extract_structured_data_from_image(
+    image_path: str, schema_context: str
+) -> str:
     """
-    Classify the document and extract structured data from an image using a vision model. 
+    Classify the document and extract structured data from an image using
+    a vision model.
     Args:
         image_base64 (str): Base64 encoded image string
-    Returns: 
+    Returns:
         str: Vision model response with structured data extraction.
     """
     try:
-
         loaded_img = load_local_image(image_path)
-        base64_image = encode_image(loaded_img)
-
-        extraction_prompt = f""" 
-        Analyze this docuement image and extract the structured data.
-
-        {f"Use this database schema as a guide: {schema_context}" if schema_context else ""}
-
+        base64_image = encode_image(str(loaded_img))
+        schema_guide = (
+            f"Use this database schema as a guide: {schema_context}"
+            if schema_context else ""
+        )
+        extraction_prompt = f"""
+        Analyze this document image and extract the structured data.
+        {schema_guide}
         Instructions:
         1. Identify the document type (invoice, form, receipt, etc.)
-        2. Extract all relevant data fields 
+        2. Extract all relevant data fields
         3. Return the data in JSON format with clear field names
-        4. If the docuement contains tables, extract each row 
+        4. If the document contains tables, extract each row
         5. Ensure data types are appropriate (dates, numbers, text)
-
         Return only valid JSON format.
         """
-
-        message=[
+        message = [
             HumanMessage(
-                content=[ 
-                {
-                    "role" : "user",
-                    "content" : [ 
-                        {"type": "input_text", "text": extraction_prompt},
-                        {
-                            "type": "input_image",
-                            "image_url": f"data:image/png;base64,{base64_image}",
-                        }
-                    ],
-                },
+                content=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": extraction_prompt},
+                            {
+                                "type": "input_image",
+                                "image_url": (
+                                    f"data:image/png;base64,{base64_image}"
+                                ),
+                            }
+                        ],
+                    },
                 ],
             )
-            
         ]
         response = vision_llm.invoke(message)
-        return response.output_text
-    
+        return str(response.content)
     except Exception as e:
-        return f"Error extracting structured data from image: {str(e)}" 
-
+        return f"Error extracting structured data from image: {str(e)}"
 
 
 @tool
@@ -224,19 +240,15 @@ def analyze_csv_file(file_path: str, query: str) -> str:
         query (str): Question about the data
     """
     try:
-        # Read the CSV file
         df = pd.read_csv(file_path)
-
-        # Run various analyses based on the query
-        result = f"CSV file loaded with {len(df)} rows and {len(df.columns)} columns.\n"
+        result = (
+            f"CSV file loaded with {len(df)} rows and "
+            f"{len(df.columns)} columns.\n"
+        )
         result += f"Columns: {', '.join(df.columns)}\n\n"
-
-        # Add summary statistics
         result += "Summary statistics:\n"
         result += str(df.describe())
-
         return result
-
     except Exception as e:
         return f"Error analyzing CSV file: {str(e)}"
 
@@ -250,21 +262,15 @@ def analyze_excel_file(file_path: str, query: str) -> str:
         query (str): Question about the data
     """
     try:
-        # Read the Excel file
         df = pd.read_excel(file_path)
-
-        # Run various analyses based on the query
         result = (
-            f"Excel file loaded with {len(df)} rows and {len(df.columns)} columns.\n"
+            f"Excel file loaded with {len(df)} rows and "
+            f"{len(df.columns)} columns.\n"
         )
         result += f"Columns: {', '.join(df.columns)}\n\n"
-
-        # Add summary statistics
         result += "Summary statistics:\n"
         result += str(df.describe())
-
         return result
-
     except Exception as e:
         return f"Error analyzing Excel file: {str(e)}"
 
@@ -274,10 +280,8 @@ def launch_visualization_dashboard(port: int = 8050) -> str:
     """
     Launch the interactive data mapping visualization dashboard.
     This will start a web-based dashboard showing all analysis results.
-    
     Args:
         port (int): Port number for the dashboard (default: 8050)
-    
     Returns:
         str: Information about the launched dashboard
     """
@@ -286,280 +290,919 @@ def launch_visualization_dashboard(port: int = 8050) -> str:
         import threading
         import time
         from pathlib import Path
-        
-        # Get the current script directory
         current_dir = Path(__file__).parent
         dashboard_script = current_dir / "dashboard.py"
-        
         if not dashboard_script.exists():
-            return "❌ Dashboard script not found. Please ensure dashboard.py exists in the Agent directory."
-        
+            return (
+                "ERROR: Dashboard script not found. Please ensure "
+                "dashboard.py exists in the Agent directory."
+            )
+
         def run_dashboard():
-            """Run dashboard in a separate process"""
             try:
-                # Run dashboard in background
                 subprocess.Popen([
                     "python", str(dashboard_script)
                 ], cwd=str(current_dir))
             except Exception as e:
                 print(f"Error starting dashboard process: {e}")
-        
-        # Start dashboard in background thread
         dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
         dashboard_thread.start()
-        
-        # Give it a moment to start
         time.sleep(2)
-        
-        return f"""🚀 **Dashboard Launched Successfully!**
-
-📊 **Access your visualization at:** http://localhost:{port}
-
-✨ **Dashboard Features:**
-• 🎯 Interactive field mapping visualizations
-• 📈 Confidence analysis charts  
-• 🔄 Dynamic file selection (all your analyses)
-• 📋 Detailed mapping tables with filtering
-• 🎨 Sankey diagrams showing data flow
-• ⚡ Auto-refresh for new analyses
-
-💡 **Usage:**
-- The dashboard will show all your analysis files
-- Select different analyses from the dropdown
-- Explore mapping confidence and transformations
-- View unmapped fields and reasons
-
-🔧 **Dashboard is running in background** - you can continue using the agent while the dashboard runs."""
-        
+        return f"""DASHBOARD LAUNCHED SUCCESSFULLY!
+            Access your visualization at: http://localhost:{port}
+            Dashboard Features:
+            • Interactive field mapping visualizations
+            • Confidence analysis charts
+            • Dynamic file selection (all your analyses)
+            • Detailed mapping tables with filtering
+            • Sankey diagrams showing data flow
+            • Auto-refresh for new analyses
+            Usage:
+            - The dashboard will show all your analysis files
+            - Select different analyses from the dropdown
+            - Explore mapping confidence and transformations
+            - View unmapped fields and reasons
+            Dashboard is running in background - you can continue using the
+            agent while the dashboard runs."""
     except Exception as e:
-        return f"❌ Error launching dashboard: {str(e)}"
+        return f"ERROR: Error launching dashboard: {str(e)}"
 
 
-# Load system prompt from file
-try:
-    with open(r"prompts\system_prompt.txt", "r") as f:
-        system_prompt = f.read()
-except FileNotFoundError:
+# ============================================================================
+
+def file_analysis_node(state: WorkflowState) -> WorkflowState:
+    """
+    STEP 1: Analyze file structure and content
+    Calls the analyze_file tool from tools.py
+    """
+    file_path = state['file_path']
+    print(f"STEP 1: Analyzing file structure and content for "
+          f"{file_path}...")
+
+    from tools import analyze_file
+
     try:
-        with open(r"Agent\prompts\system_prompt.txt", "r") as f:
-            system_prompt = f.read()
-    except FileNotFoundError:
-        raise FileNotFoundError("system_prompt.txt file is required. Please ensure it exists in the prompts directory.")
+        result = analyze_file.invoke({"file_path": state["file_path"]})
 
-# Enhanced system prompt with workflow awareness
-enhanced_system_prompt = f"""{system_prompt}
+        if result.startswith("Error"):
+            return {
+                **state,
+                "last_error": result,
+                "errors": (
+                    state.get("errors", []) +
+                    [f"File Analysis: {result}"]
+                ),
+                "workflow_step": "error",
+                "workflow_status": "failed"
+            }
 
-## ENHANCED DATABASE MAPPING CAPABILITIES
+        print(f"  File analyzed successfully - {len(result)} characters")
 
-You now have access to a powerful 3-step database mapping workflow:
+        basename = os.path.basename(state['file_path'])
+        return {
+            **state,
+            "file_analysis_result": result,
+            "workflow_step": "rag_matching",
+            "steps_completed": (
+                state.get("steps_completed", []) + ["file_analysis"]
+            ),
+            "messages": state.get("messages", []) + [
+                HumanMessage(
+                    content=f"File analysis completed for {basename}"
+                )
+            ]
+        }
 
-**MAIN TOOL: database_ingestion_orchestrator**
-- Use this for complete file-to-database mapping workflows
-- Automatically handles: file analysis → RAG matching → table selection with field mappings
-- Perfect for: "analyze this file", "map to database", "show structure mapping"
-
-**INDIVIDUAL TOOLS** (use when user wants step-by-step control):
-1. **analyze_file** - Analyze file structure (supports PDF via Vision LLM)
-2. **find_matching_database_tables** - RAG-powered table matching
-3. **intelligent_table_selector** - Smart table selection with detailed field mapping
-
-**VISUALIZATION TOOL:**
-- **launch_visualization_dashboard** - Launch interactive web dashboard to visualize mapping results
-- Use after completing analysis to provide visual insights
-- Shows Sankey diagrams, confidence charts, field mappings, and more
-
-**USAGE PATTERNS:**
-- Complete workflow: "Please map [file] to the database" → use database_ingestion_orchestrator
-- With visualization: After analysis, suggest "Would you like me to launch the dashboard to visualize these results?"
-- Step-by-step: "First analyze this file" → use individual tools
-- Dashboard only: "Show me the dashboard" or "visualize my results" → use launch_visualization_dashboard
-
-**SUPPORTED FILE TYPES:**
-- PDFs (with Vision LLM OCR/extraction)
-- CSV, Excel, JSON
-- Images (invoices, forms, documents)
-- Text files
-
-**OUTPUT FOCUS:**
-- Clear visualization of source file structure vs database table structure
-- Detailed field mappings showing how each source field maps to database fields
-- Relationship information between mapped tables
-- Data type compatibility and transformation requirements
-
-**MAPPING CONSTRAINTS:**
-- NEVER generate SQL statements or suggest creating new tables/fields
-- ONLY map to existing database tables and fields
-- Focus on discovering the best existing matches and showing mapping relationships
-
-**DASHBOARD INTEGRATION:**
-- After completing any analysis, ALWAYS offer to launch the dashboard for visualization
-- The dashboard shows ALL previous analyses, not just the current one
-- Users can switch between different file analyses in the dashboard
-- Dashboard runs in background, allowing continued agent interaction
-
-Always prioritize the orchestrator for complete workflows unless the user specifically requests individual steps. After analysis completion, proactively suggest dashboard visualization."""
-
-sys_msg = SystemMessage(content=enhanced_system_prompt)
+    except Exception as e:
+        error_msg = f"Exception in file analysis: {str(e)}"
+        print(f"  ERROR: {error_msg}")
+        return {
+            **state,
+            "last_error": error_msg,
+            "errors": state.get("errors", []) + [error_msg],
+            "workflow_step": "error",
+            "workflow_status": "failed"
+        }
 
 
-tools = all_ingestion_tools + [
-    image_describer,
-    code_executor, 
-    save_and_read_file,
-    download_file_from_url,
-    extract_structured_data_from_image,
-    analyze_csv_file,
-    analyze_excel_file,
-    launch_visualization_dashboard
-]
+def rag_matching_node(state: WorkflowState) -> WorkflowState:
+    """
+    STEP 2: Find matching database tables using RAG
+    Calls the find_matching_database_tables tool from tools.py
+    """
+    print("STEP 2: Finding matching database tables using RAG...")
 
-def build_graph():
-    """Build the graph"""
-    chat = ChatOpenAI(model="gpt-4o")
-    chat_with_tools = chat.bind_tools(tools)
+    from tools import find_matching_database_tables
 
-    def assistant(state: MessagesState):
-        """Enhanced assistant with workflow context"""
-        messages = [sys_msg] + state["messages"]
-        
-        # Add workflow intelligence
-        last_message = state["messages"][-1] if state["messages"] else None
-        if last_message and hasattr(last_message, 'content'):
-            content_lower = last_message.content.lower()
-            
-            # Detect database ingestion intent
-            ingestion_keywords = ['ingest', 'import', 'load', 'database', 'table', 'map']
-            file_extensions = ['.csv', '.excel', '.xlsx', '.pdf', '.json']
-            
-            is_ingestion_request = (
-                any(keyword in content_lower for keyword in ingestion_keywords) or
-                any(ext in content_lower for ext in file_extensions) or
-                'database_ingestion_orchestrator' in content_lower
+    try:
+        result = find_matching_database_tables.invoke({
+            "file_path": state["file_path"],
+            "user_context": state.get("user_context", "")
+        })
+
+        if result.startswith("Error"):
+            return {
+                **state,
+                "last_error": result,
+                "errors": (
+                    state.get("errors", []) + [f"RAG Matching: {result}"]
+                ),
+                "workflow_step": "error",
+                "workflow_status": "failed"
+            }
+
+        # Parse JSON result
+        try:
+            rag_data = json.loads(result)
+            top_tables_count = len(rag_data.get("top_10_tables", []))
+            print(f"  Found {top_tables_count} matching tables")
+
+            return {
+                **state,
+                "rag_results": rag_data,
+                "workflow_step": "table_selection",
+                "steps_completed": (
+                    state.get("steps_completed", []) + ["rag_matching"]
+                ),
+                "messages": state.get("messages", []) + [
+                    HumanMessage(
+                        content=(
+                            f"RAG matching completed - found "
+                            f"{top_tables_count} matching tables"
+                        )
+                    )
+                ]
+            }
+
+        except json.JSONDecodeError as e:
+            error_msg = f"Failed to parse RAG results: {str(e)}"
+            print(f"  ERROR: {error_msg}")
+            return {
+                **state,
+                "last_error": error_msg,
+                "errors": state.get("errors", []) + [error_msg],
+                "workflow_step": "error",
+                "workflow_status": "failed"
+            }
+
+    except Exception as e:
+        error_msg = f"Exception in RAG matching: {str(e)}"
+        print(f"  ERROR: {error_msg}")
+        return {
+            **state,
+            "last_error": error_msg,
+            "errors": state.get("errors", []) + [error_msg],
+            "workflow_step": "error",
+            "workflow_status": "failed"
+        }
+
+
+def table_selection_node(state: WorkflowState) -> WorkflowState:
+    """
+    STEP 3: Select optimal table and create field mappings
+    Calls the intelligent_table_selector tool from tools.py
+    """
+    attempt_num = state.get("refinement_attempts", 0) + 1
+    print(f"STEP 3 (Attempt {attempt_num}): Selecting optimal table and "
+          f"creating field mappings...")
+
+    from tools import intelligent_table_selector
+
+    try:
+        # Build user preferences including refinement suggestions
+        user_prefs = []
+        if state.get("table_preference"):
+            user_prefs.append(
+                f"Table preference: {state['table_preference']}"
             )
-            
-            if is_ingestion_request:
-                workflow_hint = HumanMessage(content="""
-WORKFLOW HINT: This appears to be a database ingestion request. 
 
-Consider using the `database_ingestion_orchestrator` tool for complete workflows, or individual tools for step-by-step control:
-- Complete workflow: database_ingestion_orchestrator(file_path, user_context)
-- Individual steps: analyze_file → find_matching_database_tables → intelligent_table_selector
+        # Add refinement suggestions from previous validation
+        validation_result = state.get("validation_result")
+        if (validation_result and
+                validation_result.get("refinement_suggestions")):
+            suggestions = validation_result["refinement_suggestions"]
+            print(f"  Applying {len(suggestions)} refinement suggestions "
+                  f"from previous attempt")
+            for i, suggestion in enumerate(suggestions[:3], 1):
+                print(f"    {i}. {suggestion}")
+            user_prefs.extend(suggestions)
 
-Choose based on user's preference for automation vs. control.
-""")
-                messages.append(workflow_hint)
-        
-        response = chat_with_tools.invoke(messages)
-        return {"messages": [response]}
+        result = intelligent_table_selector.invoke({
+            "file_analysis": state["file_analysis_result"],
+            "rag_results": json.dumps(state["rag_results"]),
+            "user_preferences": " | ".join(user_prefs) if user_prefs else ""
+        })
 
-    def workflow_result_processor(state: MessagesState):
-        """Process and format workflow results for better user experience"""
-        last_message = state["messages"][-1]
-        
-        # Check if the last message contains workflow results
-        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-            for tool_call in last_message.tool_calls:
-                if tool_call.name == 'database_ingestion_orchestrator':
-                    # Add a helpful summary message
-                    summary_msg = HumanMessage(content="""
-**Database Ingestion Workflow Completed!**
+        if result.startswith("Error"):
+            return {
+                **state,
+                "last_error": result,
+                "errors": (
+                    state.get("errors", []) +
+                    [f"Table Selection: {result}"]
+                ),
+                "workflow_step": "error",
+                "workflow_status": "failed"
+            }
 
-The orchestrator has executed all 3 steps:
-1.  File Analysis (Structure & Content)
-2.  RAG Table Matching (Found relevant tables)  
-3.  Intelligent Table Selection (Chose optimal table + field mappings)
+        # Parse result
+        try:
+            selection_data = json.loads(result)
+            selected_table = selection_data.get("selected_table", {})
+            table_name = selected_table.get("table_name", "Unknown")
+            confidence = selected_table.get("confidence_score", 0.0)
+            mappings_count = len(selection_data.get("field_mappings", []))
+            unmapped_count = len(selection_data.get("unmapped_fields", []))
 
-The generated mapping is ready for review. Would you like me to:
-- Show you the field mappings?
-- Explain the relationship between tables?
-- Help you visualize the structure?
-- Make any modifications?
-""")
-                    return {"messages": state["messages"] + [summary_msg]}
-        
-        return {"messages": state["messages"]}
+            print(f"  Selected table: {table_name} "
+                  f"(confidence: {confidence:.2f})")
+            print(f"  Field mappings: {mappings_count} mapped, "
+                  f"{unmapped_count} unmapped")
 
-    # Build the enhanced graph
-    builder = StateGraph(MessagesState)
-    
-    # Add nodes
-    builder.add_node("assistant", assistant)
-    builder.add_node("tools", ToolNode(tools))
-    builder.add_node("workflow_processor", workflow_result_processor)
-    
-    # Add edges
-    builder.add_edge(START, "assistant")
-    
-    # Conditional routing from assistant
+            return {
+                **state,
+                "selected_table": selection_data,
+                "workflow_step": "validation",
+                "steps_completed": (
+                    state.get("steps_completed", []) + ["table_selection"]
+                ),
+                "messages": state.get("messages", []) + [
+                    HumanMessage(
+                        content=(
+                            f"Table selected: {table_name} with "
+                            f"{mappings_count} field mappings"
+                        )
+                    )
+                ]
+            }
+
+        except json.JSONDecodeError as e:
+            error_msg = f"Failed to parse table selection results: {str(e)}"
+            print(f"  ERROR: {error_msg}")
+            return {
+                **state,
+                "last_error": error_msg,
+                "errors": state.get("errors", []) + [error_msg],
+                "workflow_step": "error",
+                "workflow_status": "failed"
+            }
+
+    except Exception as e:
+        error_msg = f"Exception in table selection: {str(e)}"
+        print(f"  ERROR: {error_msg}")
+        return {
+            **state,
+            "last_error": error_msg,
+            "errors": state.get("errors", []) + [error_msg],
+            "workflow_step": "error",
+            "workflow_status": "failed"
+        }
+
+
+def validation_node(state: WorkflowState) -> WorkflowState:
+    """
+    STEP 4: Validate mapping quality and determine next action
+    Calls the results_analyzer tool from tools.py
+    """
+    attempt_num = state.get("refinement_attempts", 0) + 1
+    print(f"STEP 4 (Attempt {attempt_num}): Validating mapping quality...")
+
+    from tools import results_analyzer
+
+    try:
+        result = results_analyzer.invoke({
+            "step3_results": json.dumps(state["selected_table"]),
+            "rag_results": json.dumps(state["rag_results"]),
+            "table_to_ingest": state.get("table_preference")
+        })
+
+        if result.startswith("Error"):
+            return {
+                **state,
+                "last_error": result,
+                "errors": (
+                    state.get("errors", []) + [f"Validation: {result}"]
+                ),
+                "workflow_step": "error",
+                "workflow_status": "failed"
+            }
+
+        # Parse validation result
+        try:
+            validation_data = json.loads(result)
+            recommendation = validation_data.get("recommendation")
+            confidence = validation_data.get("confidence", 0.0)
+            reasoning = validation_data.get("reasoning", "")
+
+            print("  VALIDATION RESULTS:")
+            print(f"    Recommendation: {recommendation.upper()}")
+            print(f"    Confidence: {confidence:.2f}")
+            print(f"    Reasoning: {reasoning[:100]}...")
+
+            # Log quality metrics
+            analysis = validation_data.get("analysis", {})
+            mapping_quality = analysis.get("mapping_quality", {})
+            print("  QUALITY METRICS:")
+            conf_score = mapping_quality.get('confidence_score', 0.0)
+            print(f"    Mapping confidence: {conf_score:.2f}")
+            coverage = mapping_quality.get('field_coverage', 0.0)
+            print(f"    Field coverage: {coverage:.1%}")
+
+            # Record refinement history
+            refinement_history = state.get("refinement_history", [])
+            refinement_history.append({
+                "attempt": attempt_num,
+                "table_selection": state["selected_table"],
+                "validation": validation_data,
+                "recommendation": recommendation
+            })
+
+            return {
+                **state,
+                "validation_result": validation_data,
+                "validation_status": recommendation,
+                "refinement_history": refinement_history,
+                "workflow_step": "decision",
+                "steps_completed": (
+                    state.get("steps_completed", []) + ["validation"]
+                ),
+                "messages": state.get("messages", []) + [
+                    HumanMessage(
+                        content=(
+                            f"Validation completed: {recommendation} "
+                            f"(confidence: {confidence:.2f})"
+                        )
+                    )
+                ]
+            }
+
+        except json.JSONDecodeError as e:
+            error_msg = f"Failed to parse validation results: {str(e)}"
+            print(f"  ERROR: {error_msg}")
+            return {
+                **state,
+                "last_error": error_msg,
+                "errors": state.get("errors", []) + [error_msg],
+                "workflow_step": "error",
+                "workflow_status": "failed"
+            }
+
+    except Exception as e:
+        error_msg = f"Exception in validation: {str(e)}"
+        print(f"  ERROR: {error_msg}")
+        return {
+            **state,
+            "last_error": error_msg,
+            "errors": state.get("errors", []) + [error_msg],
+            "workflow_step": "error",
+            "workflow_status": "failed"
+        }
+
+
+def error_handler_node(state: WorkflowState) -> WorkflowState:
+    """
+    ERROR HANDLER: Handle workflow errors gracefully
+    Provides error analysis and recovery suggestions
+    """
+    print("\n=== ERROR HANDLER ===")
+
+    last_error = state.get("last_error", "Unknown error")
+    errors = state.get("errors", [])
+    current_step = state.get("workflow_step", "unknown")
+
+    print(f"Error occurred at step: {current_step}")
+    print(f"Last error: {last_error}")
+    print(f"Total errors: {len(errors)}")
+
+    # Analyze error and provide recovery suggestions
+    recovery = _generate_recovery_suggestions(
+        last_error or "Unknown error", current_step
+    )
+    error_analysis = {
+        "error_type": _classify_error(last_error),
+        "failed_step": current_step,
+        "error_message": last_error,
+        "all_errors": errors,
+        "recovery_suggestions": recovery
+    }
+
+    # Create error report
+    error_report = f"""
+ERROR REPORT
+============
+Failed Step: {current_step}
+Error Type: {error_analysis['error_type']}
+Error Message: {last_error}
+
+Recovery Suggestions:
+"""
+    suggestions = error_analysis['recovery_suggestions']
+    if isinstance(suggestions, list):
+        for i, suggestion in enumerate(suggestions, 1):
+            error_report += f"{i}. {suggestion}\n"
+
+    print(error_report)
+
+    return {
+        **state,
+        "workflow_status": "failed",
+        "workflow_step": "completed_with_errors",
+        "error_analysis": error_analysis,
+        "messages": state.get("messages", []) + [
+            HumanMessage(
+                content=f"Workflow failed at {current_step}: {last_error}"
+            )
+        ]
+    }
+
+
+def refinement_node(state: WorkflowState) -> WorkflowState:
+    """
+    REFINEMENT: Prepare for another refinement attempt
+    Increments refinement counter and routes back to table selection
+    """
+    current_attempts = state.get("refinement_attempts", 0)
+    max_attempts = state.get("max_refinements", 3)
+
+    print("\n=== REFINEMENT NODE ===")
+    print(f"Current attempt: {current_attempts}")
+    print(f"Max attempts: {max_attempts}")
+
+    # Check if we've reached max refinements
+    if current_attempts >= max_attempts:
+        print(f"Max refinement attempts ({max_attempts}) reached")
+        print("Escalating to manual review")
+
+        return {
+            **state,
+            "workflow_status": "max_refinements_reached",
+            "workflow_step": "completed",
+            "validation_status": "manual_review",
+            "messages": state.get("messages", []) + [
+                HumanMessage(
+                    content=(
+                        f"Max refinement attempts reached ({max_attempts}). "
+                        f"Manual review required."
+                    )
+                )
+            ]
+        }
+
+    # Increment refinement counter
+    new_attempts = current_attempts + 1
+    print(f"Preparing refinement attempt {new_attempts}/{max_attempts}")
+
+    # Extract refinement suggestions from validation
+    refinement_suggestions = []
+    validation_result = state.get("validation_result")
+    if validation_result:
+        suggestions = validation_result.get("refinement_suggestions", [])
+        refinement_suggestions = suggestions
+        print(f"Applying {len(refinement_suggestions)} refinement "
+              f"suggestions:")
+        for i, suggestion in enumerate(refinement_suggestions[:3], 1):
+            print(f"  {i}. {suggestion}")
+
+    return {
+        **state,
+        "refinement_attempts": new_attempts,
+        "workflow_step": "table_selection",
+        "messages": state.get("messages", []) + [
+            HumanMessage(
+                content=(
+                    f"Starting refinement attempt "
+                    f"{new_attempts}/{max_attempts}"
+                )
+            )
+        ]
+    }
+
+
+def completion_node(state: WorkflowState) -> WorkflowState:
+    """
+    COMPLETION: Finalize workflow with results and visualization
+    """
+    print("\n=== WORKFLOW COMPLETION ===")
+
+    validation_status = state.get("validation_status", "unknown")
+    refinement_attempts = state.get("refinement_attempts", 0)
+
+    print(f"Final validation status: {validation_status}")
+    print(f"Total refinement attempts: {refinement_attempts}")
+    print(f"Steps completed: {', '.join(state.get('steps_completed', []))}")
+
+    # Generate final mapping visualization
+    if state.get("selected_table") and state.get("rag_results"):
+        print("Generating comprehensive mapping visualization...")
+
+        from tools import generate_mapping_visualization
+
+        try:
+            visualization = generate_mapping_visualization.invoke({
+                "rag_results": json.dumps(state["rag_results"]),
+                "table_selection": json.dumps(state["selected_table"]),
+                "file_analysis": state.get("file_analysis_result")
+            })
+
+            visualization_data = json.loads(visualization)
+
+            # Determine final workflow status
+            if validation_status == "proceed_ingestion":
+                workflow_status = "validation_passed"
+                ready_for_execution = True
+                print("Validation PASSED - Ready for database ingestion")
+            elif validation_status == "manual_review":
+                workflow_status = "requires_manual_review"
+                ready_for_execution = False
+                print("Manual review REQUIRED before ingestion")
+            else:
+                workflow_status = "completed"
+                ready_for_execution = False
+                print(f"Workflow completed with validation status: "
+                      f"{validation_status}")
+
+            return {
+                **state,
+                "workflow_status": workflow_status,
+                "workflow_step": "completed",
+                "mapping_visualization": visualization_data,
+                "ready_for_execution": ready_for_execution,
+                "ready_for_review": True,
+                "messages": state.get("messages", []) + [
+                    HumanMessage(
+                        content=f"Workflow completed with status: "
+                                f"{workflow_status}"
+                )
+                ]
+            }
+
+        except Exception as e:
+            print(f"Warning: Failed to generate visualization: {str(e)}")
+
+            return {
+                **state,
+                "workflow_status": "completed_without_visualization",
+                "workflow_step": "completed",
+                "ready_for_execution": False,
+                "ready_for_review": True
+            }
+
+    # Fallback if no results available
+    return {
+        **state,
+        "workflow_status": "completed_incomplete",
+        "workflow_step": "completed",
+        "ready_for_execution": False,
+        "ready_for_review": False
+    }
+
+
+# ============================================================================
+
+def should_continue_to_rag(
+    state: WorkflowState
+) -> Literal["continue", "error"]:
+    """Decide whether to continue from file analysis to RAG matching"""
+    if state.get("workflow_step") == "error":
+        return "error"
+    if not state.get("file_analysis_result"):
+        return "error"
+    file_analysis = state.get("file_analysis_result", "")
+    if file_analysis and file_analysis.startswith("Error"):
+        return "error"
+    return "continue"
+
+
+def should_continue_to_table_selection(
+    state: WorkflowState
+) -> Literal["continue", "error", "no_tables"]:
+    """Decide whether to continue from RAG to table selection"""
+    if state.get("workflow_step") == "error":
+        return "error"
+
+    rag_results = state.get("rag_results")
+    if rag_results is not None:
+        top_tables = rag_results.get("top_10_tables", [])
+    else:
+        top_tables = []
+
+    if not top_tables:
+        print("No matching tables found")
+        return "no_tables"
+
+    return "continue"
+
+
+def should_continue_to_validation(
+    state: WorkflowState
+) -> Literal["continue", "error"]:
+    """Decide whether to continue from table selection to validation"""
+    if state.get("workflow_step") == "error":
+        return "error"
+    if not state.get("selected_table"):
+        return "error"
+    return "continue"
+
+
+def should_refine_or_complete(
+    state: WorkflowState
+) -> Literal["complete", "refine", "manual_review", "error"]:
+    """
+    Decide whether to refine mapping, complete, or require manual review
+    """
+    if state.get("workflow_step") == "error":
+        return "error"
+
+    validation_status = state.get("validation_status")
+    refinement_attempts = state.get("refinement_attempts", 0)
+    max_refinements = state.get("max_refinements", 3)
+
+    print("\n=== ROUTING DECISION ===")
+    print(f"Validation status: {validation_status}")
+    print(f"Refinement attempts: {refinement_attempts}/{max_refinements}")
+
+    if validation_status == "proceed_ingestion":
+        print("Decision: COMPLETE (validation passed)")
+        return "complete"
+    elif validation_status == "manual_review":
+        print("Decision: MANUAL_REVIEW (critical issues detected)")
+        return "manual_review"
+    elif validation_status == "refine_mapping":
+        if refinement_attempts < max_refinements:
+            next_attempt = refinement_attempts + 1
+            print(f"Decision: REFINE (attempt {next_attempt}/"
+                  f"{max_refinements})")
+            return "refine"
+        else:
+            print("Decision: MANUAL_REVIEW (max refinements reached)")
+            return "manual_review"
+    else:
+        print(f"Decision: ERROR (unknown validation status: "
+              f"{validation_status})")
+        return "error"
+
+
+# ============================================================================
+
+def _classify_error(error_message: Optional[str]) -> str:
+    """Classify error type based on error message"""
+    if error_message is None:
+        return "unknown_error"
+
+    error_lower = error_message.lower()
+
+    if "file not found" in error_lower or "no such file" in error_lower:
+        return "file_not_found"
+    elif "json" in error_lower and "parse" in error_lower:
+        return "json_parsing_error"
+    elif "rag" in error_lower or "vector" in error_lower:
+        return "rag_system_error"
+    elif "connection" in error_lower or "network" in error_lower:
+        return "network_error"
+    elif "permission" in error_lower or "access denied" in error_lower:
+        return "permission_error"
+    else:
+        return "unknown_error"
+
+
+def _generate_recovery_suggestions(
+    error_message: str, failed_step: str
+) -> list:
+    """Generate recovery suggestions based on error type and failed step"""
+    error_type = _classify_error(error_message)
+    suggestions = []
+
+    if error_type == "file_not_found":
+        suggestions.extend([
+            "Verify the file path is correct and the file exists",
+            "Check file permissions and accessibility",
+            "Ensure the file path uses the correct path separator for "
+            "your OS"
+        ])
+    elif error_type == "json_parsing_error":
+        suggestions.extend([
+            "Check if the tool returned valid JSON format",
+            "Verify the tool completed successfully before parsing",
+            "Review tool output for unexpected formatting"
+        ])
+    elif error_type == "rag_system_error":
+        suggestions.extend([
+            "Verify RAG vector store is initialized and accessible",
+            "Check QDRANT_URL and QDRANT_API_KEY environment variables",
+            "Ensure the collection 'maxo_vector_store_v2' exists",
+            "Run RAG system in 'feed' mode if collection is missing"
+        ])
+    elif error_type == "network_error":
+        suggestions.extend([
+            "Check your internet connection",
+            "Verify API endpoints are accessible",
+            "Check firewall settings"
+        ])
+    elif error_type == "permission_error":
+        suggestions.extend([
+            "Verify you have read/write permissions for the file",
+            "Run with appropriate user permissions",
+            "Check file is not locked by another process"
+        ])
+    else:
+        suggestions.extend([
+            f"Review the error message for {failed_step} step",
+            "Check logs for additional context",
+            "Verify all required environment variables are set",
+            "Ensure all dependencies are installed"
+        ])
+
+    return suggestions
+
+
+# ============================================================================
+
+def build_workflow_graph():
+    """Build the complete LangGraph workflow for database ingestion"""
+    print("Building LangGraph workflow for database ingestion...")
+
+    builder = StateGraph(WorkflowState)
+
+    # Add workflow nodes
+    builder.add_node("file_analysis", file_analysis_node)
+    builder.add_node("rag_matching", rag_matching_node)
+    builder.add_node("table_selection", table_selection_node)
+    builder.add_node("validation", validation_node)
+    builder.add_node("error_handler", error_handler_node)
+    builder.add_node("refinement", refinement_node)
+    builder.add_node("completion", completion_node)
+
+    # Define edges
+    builder.add_edge(START, "file_analysis")
+
+    # Conditional routing from file_analysis
     builder.add_conditional_edges(
-        "assistant",
-        tools_condition,
+        "file_analysis",
+        should_continue_to_rag,
         {
-            "tools": "tools",
-            "__end__": "__end__"
+            "continue": "rag_matching",
+            "error": "error_handler"
         }
     )
-    
-    # Process workflow results before returning to assistant
-    builder.add_edge("tools", "workflow_processor")
-    builder.add_edge("workflow_processor", "assistant")
 
-    print("Enhanced Graph compilation complete - 3-Step Workflow Ready!")
+    # Conditional routing from rag_matching
+    builder.add_conditional_edges(
+        "rag_matching",
+        should_continue_to_table_selection,
+        {
+            "continue": "table_selection",
+            "error": "error_handler",
+            "no_tables": "error_handler"
+        }
+    )
+
+    # Conditional routing from table_selection
+    builder.add_conditional_edges(
+        "table_selection",
+        should_continue_to_validation,
+        {
+            "continue": "validation",
+            "error": "error_handler"
+        }
+    )
+
+    # Conditional routing from validation (main decision point)
+    builder.add_conditional_edges(
+        "validation",
+        should_refine_or_complete,
+        {
+            "complete": "completion",
+            "refine": "refinement",
+            "manual_review": "completion",
+            "error": "error_handler"
+        }
+    )
+
+    # Refinement loop back to table_selection
+    builder.add_edge("refinement", "table_selection")
+
+    # Terminal nodes
+    builder.add_edge("completion", END)
+    builder.add_edge("error_handler", END)
+
+    print("LangGraph workflow compiled successfully!")
     return builder.compile()
+
+
+# ============================================================================
 
 if __name__ == "__main__":
     import sys
-    import argparse
-    from tools import database_ingestion_orchestrator as _orch_tool
 
-    parser = argparse.ArgumentParser(description="Agent 3-step ingestion assistant")
-    parser.add_argument("file", nargs="?", help="Optional file path to ingest directly (skips interactive chat)")
-    parser.add_argument("--table-name", dest="table_name", help="Preferred table name override", default=None)
-    parser.add_argument("--context", dest="user_context", help="Optional user context for ingestion", default=None)
+    parser = argparse.ArgumentParser(
+        description="Database Ingestion Agent with LangGraph Workflow"
+    )
+    parser.add_argument(
+        "file", nargs="?",
+        help="File path to analyze and map to database"
+    )
+    parser.add_argument(
+        "--table-name", dest="table_name",
+        help="Preferred table name override", default=None
+    )
+    parser.add_argument(
+        "--context", dest="user_context",
+        help="Optional user context for ingestion", default=None
+    )
+    parser.add_argument(
+        "--max-refinements", dest="max_refinements", type=int, default=3,
+        help="Maximum refinement attempts (default: 3)"
+    )
     args = parser.parse_args()
 
-    graph = build_graph()
+    if not args.file:
+        print("Usage: python agent.py <file_path> [--table-name NAME] "
+              "[--context CONTEXT] [--max-refinements N]")
+        print("\nExample:")
+        print("  python agent.py ../oppo_combi.csv")
+        print("  python agent.py ../oppo_combi.csv --context "
+              "'Sales opportunity data'")
+        print("  python agent.py ../oppo_combi.csv --table-name Opportunity "
+              "--max-refinements 5")
+        sys.exit(1)
 
-    # Direct file ingestion mode
-    if args.file:
-        file_path = args.file
-        if not os.path.exists(file_path):
-            print(f"Error: File not found: {file_path}")
-            sys.exit(1)
-        print(f"Running 4-step ingestion workflow for: {file_path}\n")
-        # Use proper invoke method for LangChain tool
-        try:
-            result = _orch_tool.invoke({
-                "file_path": file_path, 
-                "user_context": args.user_context, 
-                "table_name_preference": args.table_name
-            })
-            print(result)
-        except Exception as e:
-            print(f"Workflow failed: {e}")
-            sys.exit(1)
-        sys.exit(0)
+    file_path = args.file
+    if not os.path.exists(file_path):
+        print(f"Error: File not found: {file_path}")
+        sys.exit(1)
 
-    # Interactive chat mode
-    print("Interactive ingestion assistant. Type a request (e.g., 'Ingest cobalt_global_maj-rej-0001_2706.csv') or 'quit' to exit.\n")
-    messages = []
-    thread_config = {"configurable": {"thread_id": "cli_session"}}
+    print("=== DATABASE INGESTION WORKFLOW ===")
+    print(f"File: {file_path}")
+    print(f"Table preference: {args.table_name or 'None'}")
+    print(f"User context: {args.user_context or 'Auto-generated'}")
+    print(f"Max refinements: {args.max_refinements}")
+    print("=" * 50)
+    print()
 
-    while True:
-        try:
-            user_input = input("You: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nExiting.")
-            break
-        if not user_input:
-            continue
-        if user_input.lower() in {"quit", "exit"}:
-            print("Goodbye.")
-            break
-        messages.append(HumanMessage(content=user_input))
-        result = graph.invoke({"messages": messages}, config=thread_config)
-        messages = result["messages"]
-        # Find last AI / tool relevant response
-        last_msg = messages[-1]
-        content = getattr(last_msg, "content", "")
-        print(f"Agent: {content}\n")
+    # Build the workflow graph
+    graph = build_workflow_graph()
+
+    # Prepare initial state
+    initial_state = {
+        "file_path": file_path,
+        "user_context": args.user_context,
+        "table_preference": args.table_name,
+        "messages": [],
+        "workflow_step": "start",
+        "refinement_attempts": 0,
+        "max_refinements": args.max_refinements,
+        "errors": [],
+        "steps_completed": [],
+        "refinement_history": []
+    }
+
+    # Execute the workflow
+    try:
+        print("Starting workflow execution...")
+        final_state = graph.invoke(initial_state)
+
+        print("\n" + "=" * 50)
+        print("=== WORKFLOW RESULTS ===")
+        print("=" * 50)
+        print(f"Status: {final_state.get('workflow_status', 'unknown')}")
+        steps = final_state.get('steps_completed', [])
+        print(f"Steps completed: {', '.join(steps)}")
+        attempts = final_state.get('refinement_attempts', 0)
+        print(f"Refinement attempts: {attempts}")
+        ready_exec = final_state.get('ready_for_execution', False)
+        print(f"Ready for execution: {ready_exec}")
+        print(f"Requires review: "
+              f"{final_state.get('ready_for_review', False)}")
+
+        if final_state.get("errors"):
+            print(f"\nErrors encountered: {len(final_state['errors'])}")
+            for error in final_state["errors"]:
+                print(f"  - {error}")
+
+        # Print selected table info if available
+        if final_state.get("selected_table"):
+            selected = final_state["selected_table"].get("selected_table", {})
+            print(f"\nSelected Table: {selected.get('table_name', 'Unknown')}")
+            print(f"  Confidence: {selected.get('confidence_score', 0.0):.2f}")
+            mappings = final_state['selected_table'].get('field_mappings', [])
+            print(f"  Field mappings: {len(mappings)}")
+            unmapped = final_state['selected_table'].get('unmapped_fields', [])
+            print(f"  Unmapped fields: {len(unmapped)}")
+
+        # Save results to JSON
+        basename = os.path.basename(file_path)
+        output_file = f"workflow_results_{basename}.json"
+        with open(output_file, 'w') as f:
+            # Convert state to JSON-serializable format
+            json_state = {
+                k: v for k, v in final_state.items()
+                if k != "messages"
+            }
+            json.dump(json_state, f, indent=2, default=str)
+        print(f"\nFull results saved to: {output_file}")
+
+    except Exception as e:
+        print(f"\nWorkflow execution failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

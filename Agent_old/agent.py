@@ -32,27 +32,27 @@ if not OPENAI_API_KEY:
 vision_llm = ChatOpenAI(model="gpt-4o", temperature=0)
 
 
-class WorkflowState(TypedDict, total=False):
-    messages: list
-    file_path: str
-    user_context: Optional[str]
-    table_preference: Optional[str]
-    user_preferences: Optional[str]
+# class WorkflowState(TypedDict, total=False):
+#     messages: list
+#     file_path: str
+#     user_context: Optional[str]
+#     table_preference: Optional[str]
+#     user_preferences: Optional[str]
 
-    file_analysis_result: Optional[str]
-    rag_results: Optional[dict]
-    selected_table: Optional[dict]
-    validation_result: Optional[dict]
+#     file_analysis_result: Optional[str]
+#     rag_results: Optional[dict]
+#     selected_table: Optional[dict]
+#     validation_result: Optional[dict]
 
-    workflow_step: str
-    validation_status: Optional[str]
-    refinement_attempts: int
-    max_refinements: int
-    workflow_status: str
-    errors: list
-    last_error: Optional[str]
-    steps_completed: list
-    refinement_history: list
+#     workflow_step: str
+#     validation_status: Optional[str]
+#     refinement_attempts: int
+#     max_refinements: int
+#     workflow_status: str
+#     errors: list
+#     last_error: Optional[str]
+#     steps_completed: list
+#     refinement_history: list
 
 
 @tool
@@ -1017,76 +1017,76 @@ def _generate_recovery_suggestions(
 
 # ============================================================================
 
-def build_workflow_graph():
-    """Build the complete LangGraph workflow for database ingestion"""
-    print("Building LangGraph workflow for database ingestion...")
+# def build_workflow_graph():
+#     """Build the complete LangGraph workflow for database ingestion"""
+#     print("Building LangGraph workflow for database ingestion...")
 
-    builder = StateGraph(WorkflowState)
+#     builder = StateGraph(WorkflowState)
 
-    # Add workflow nodes
-    builder.add_node("file_analysis", file_analysis_node)
-    builder.add_node("rag_matching", rag_matching_node)
-    builder.add_node("table_selection", table_selection_node)
-    builder.add_node("validation", validation_node)
-    builder.add_node("error_handler", error_handler_node)
-    builder.add_node("refinement", refinement_node)
-    builder.add_node("completion", completion_node)
+#     # Add workflow nodes
+#     builder.add_node("file_analysis", file_analysis_node)
+#     builder.add_node("rag_matching", rag_matching_node)
+#     builder.add_node("table_selection", table_selection_node)
+#     builder.add_node("validation", validation_node)
+#     builder.add_node("error_handler", error_handler_node)
+#     builder.add_node("refinement", refinement_node)
+#     builder.add_node("completion", completion_node)
 
-    # Define edges
-    builder.add_edge(START, "file_analysis")
+#     # Define edges
+#     builder.add_edge(START, "file_analysis")
 
-    # Conditional routing from file_analysis
-    builder.add_conditional_edges(
-        "file_analysis",
-        should_continue_to_rag,
-        {
-            "continue": "rag_matching",
-            "error": "error_handler"
-        }
-    )
+#     # Conditional routing from file_analysis
+#     builder.add_conditional_edges(
+#         "file_analysis",
+#         should_continue_to_rag,
+#         {
+#             "continue": "rag_matching",
+#             "error": "error_handler"
+#         }
+#     )
 
-    # Conditional routing from rag_matching
-    builder.add_conditional_edges(
-        "rag_matching",
-        should_continue_to_table_selection,
-        {
-            "continue": "table_selection",
-            "error": "error_handler",
-            "no_tables": "error_handler"
-        }
-    )
+#     # Conditional routing from rag_matching
+#     builder.add_conditional_edges(
+#         "rag_matching",
+#         should_continue_to_table_selection,
+#         {
+#             "continue": "table_selection",
+#             "error": "error_handler",
+#             "no_tables": "error_handler"
+#         }
+#     )
 
-    # Conditional routing from table_selection
-    builder.add_conditional_edges(
-        "table_selection",
-        should_continue_to_validation,
-        {
-            "continue": "validation",
-            "error": "error_handler"
-        }
-    )
+#     # Conditional routing from table_selection
+#     builder.add_conditional_edges(
+#         "table_selection",
+#         should_continue_to_validation,
+#         {
+#             "continue": "validation",
+#             "error": "error_handler"
+#         }
+#     )
 
-    # Conditional routing from validation (main decision point)
-    builder.add_conditional_edges(
-        "validation",
-        should_refine_or_complete,
-        {
-            "complete": "completion",
-            "refine": "refinement",
-            "manual_review": "completion",
-            "error": "error_handler"
-        }
-    )
+#     # Conditional routing from validation (main decision point)
+#     builder.add_conditional_edges(
+#         "validation",
+#         should_refine_or_complete,
+#         {
+#             "complete": "completion",
+#             "refine": "refinement",
+#             "manual_review": "completion",
+#             "error": "error_handler"
+#         }
+#     )
 
-    # Refinement loop back to table_selection
-    builder.add_edge("refinement", "table_selection")
+#     # Refinement loop back to table_selection
+#     builder.add_edge("refinement", "table_selection")
 
-    # Terminal nodes
-    builder.add_edge("completion", END)
-    builder.add_edge("error_handler", END)
+#     # Terminal nodes
+#     builder.add_edge("completion", END)
+#     builder.add_edge("error_handler", END)
 
-    print("LangGraph workflow compiled successfully!")
-    return builder.compile()
+#     print("LangGraph workflow compiled successfully!")
+#     return builder.compile()
 
 
 # ============================================================================

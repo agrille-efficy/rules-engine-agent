@@ -17,7 +17,9 @@ class ColumnMetadata:
     """Metadata for a single column/field in the analyzed file."""
     
     name: str
+    english_name: Optional[str] = None
     data_type: str
+    translation_used: bool = False
     null_count: int = 0
     unique_count: int = 0
     max_length: Optional[int] = None

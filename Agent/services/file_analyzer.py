@@ -1,13 +1,15 @@
 """
 File analysis service - bridges tools and models.
-Structures file analysis results into data models, making them accessible for other componentns.
+Structures CSV file analysis results into data models with translation support.
+Currently supports CSV files only.
 """
 import json
+import os
 from datetime import datetime
 from typing import List
-from ..tools.file_tools import analyze_file 
+from ..tools.file_tools import analyze_file
+from ..services.translator import UniversalTranslator
 from ..models.file_analysis_model import (
-    FileAnalysisResult,
     CSVAnalysisResult,
     FileStructureInfo,
     ColumnMetadata,
@@ -16,53 +18,92 @@ from ..models.file_analysis_model import (
 
 class FileAnalyzerService:
     """
-    Service that wraps tools and provides structured outpus.
-    This is not a LangChain tool - it's internal businell logic.
+    Service that analyzes CSV files and provides structured outputs with translation.
+    This is not a LangChain tool - it's internal business logic.
     """
+    def __init__(self):
+        self.translator = UniversalTranslator()
 
-    def analyze(self, file_path: str) -> FileAnalysisResult:
+    def analyze(self, file_path: str) -> CSVAnalysisResult:
         """
-        Analyze the file and return structured result.
+        Analyze CSV file and return structured result with translated column names.
         
+        Args:
+            file_path: Path to CSV file
+            
         Returns:
-            FileAnalysisResult object
+            CSVAnalysisResult object with both original and English column names
         """
+        # Call the tool - returns JSON string for CSV
         result = analyze_file.invoke({"file_path": file_path})
 
         try:
             data = json.loads(result)
-            return self._parse_json_result(data, file_path)
-        except json.JSONDecodeError:
-            return self._parse_text_result(result, file_path)
+            
+            # Check for errors in response
+            if data.get("error"):
+                return self._create_error_result(
+                    file_path, 
+                    data.get("error", "Unknown error")
+                )
+            
+            # Parse JSON result with translation
+            return self._parse_csv_json(data, file_path)
+            
+        except json.JSONDecodeError as e:
+            return self._create_error_result(file_path, f"Failed to parse tool output: {str(e)}")
+        except Exception as e:
+            return self._create_error_result(file_path, f"Analysis failed: {str(e)}")
 
-    def _parse_json_result(self, result: json, file_path: str) -> FileAnalysisResult:
-        """Parse tool's string output into FileAnalysisResult."""
-        structure = FileStructureInfo(
-            file_name=result["file_name"],
-            file_type=result["file_type"],
-            file_path=file_path,
-            total_rows=result["dimensions"]["rows"],
-            total_columns=result["dimensions"]["columns"]
-        )
+    def _parse_csv_json(self, data: dict, file_path: str) -> CSVAnalysisResult:
+        """
+        Parse JSON output from analyze_file tool into CSVAnalysisResult.
+        Includes column translation for better semantic matching.
+        """
+        # Extract column names
+        original_columns = data.get("columns", [])
         
+        # Translate column names to English for better RAG matching
+        english_columns, translation_mapping = self.translator.translate_column_names(original_columns)
+        
+        # Build column metadata with both original and English names
         columns = []
-        for col_data in result["data_types"]:
+        for col_data in data.get("data_types", []):
+            col_name = col_data["name"]
+            col_index = original_columns.index(col_name) if col_name in original_columns else -1
+            english_name = english_columns[col_index] if col_index >= 0 else col_name
+            
             column = ColumnMetadata(
-                name=col_data["name"],
-                data_type=col_data["data_type"],
+                name=col_name,                           # Original name
+                english_name=english_name,               # Translated name
+                translation_used=(col_name != english_name),  # Translation flag
+                data_type=col_data.get("data_type", "Unknown"),
                 max_length=col_data.get("max_length"),
-                null_count=col_data["null_count"],
-                unique_count=col_data["unique_count"],
+                null_count=col_data.get("null_count", 0),
+                unique_count=col_data.get("unique_count", 0),
                 sample_values=col_data.get("sample_values", [])
             )
             columns.append(column)
 
+        # Create structure
+        dimensions = data.get("dimensions", {})
+        structure = FileStructureInfo(
+            file_name=data.get("file_name", os.path.basename(file_path)),
+            file_type="csv",
+            file_path=file_path,
+            file_size_bytes=os.path.getsize(file_path) if os.path.exists(file_path) else None,
+            total_rows=dimensions.get("rows", 0),
+            total_columns=dimensions.get("columns", 0)
+        )
+
+        # Calculate quality metrics
         total_nulls = sum(col.null_count for col in columns)
         total_cells = structure.total_rows * structure.total_columns
 
         quality_metrics = DataQualityMetrics(
             total_null_values=total_nulls,
             null_percentage=(total_nulls / total_cells * 100) if total_cells > 0 else 0.0,
+            duplicate_rows=0,  # Not provided by tool yet
             potential_issues=self._detect_quality_issues(columns, structure)
         )
 
@@ -70,80 +111,48 @@ class FileAnalyzerService:
             structure=structure,
             columns=columns,
             quality_metrics=quality_metrics,
-            sample_data=result.get("sample_data", [])[:5],
-            delimiter=result.get("delimiter"),
-            encoding=result.get("encoding"),
+            sample_data=data.get("sample_data", [])[:5],
+            delimiter=data.get("delimiter", ","),
+            encoding=data.get("encoding", "utf-8"),
             has_header=True,
+            content_preview=json.dumps(data, indent=2)[:1000],
             analysis_success=True,
             analysis_timestamp=datetime.now().isoformat()
         )
-    
 
     def _detect_quality_issues(self, columns: List[ColumnMetadata], structure: FileStructureInfo) -> List[str]:
+        """Detect data quality issues in analyzed columns."""
         issues = []
 
         for col in columns: 
             if structure.total_rows and col.null_count > 0:
-                null_percentage = (col.null_count / structure.total_rows) * 100 if structure.total_rows > 0 else 0
+                null_percentage = (col.null_count / structure.total_rows) * 100
                 if null_percentage > 50:
-                    issues.append(f"Column '{col.name}' has {null_percentage:.2f}% null values.")
+                    issues.append(f"Column '{col.name}' has {null_percentage:.1f}% null values")
 
             if col.unique_count == 1 and structure.total_rows > 1:
-                issues.append(f"Column '{col.name}' has the same value for all rows.")
+                issues.append(f"Column '{col.name}' has only one unique value")
+                
+            if col.unique_count == structure.total_rows and structure.total_rows > 10:
+                issues.append(f"Column '{col.name}' has all unique values (potential ID field)")
+        
         return issues
-
-    def _parse_text_result(self, result_str: str, file_path: str) -> FileAnalysisResult:
-        """
-        Fallback parser for plain text tool outputs (PDF, images, Excel, etc.).
-        Extracts basic information and wraps in FileAnalysisResult.
-        """
-        import os
-        
-        # Detect file type from result string
-        file_type = "unknown"
-        if "PDF" in result_str or "PDF Content Analysis" in result_str:
-            file_type = "pdf"
-        elif "Excel Analysis" in result_str:
-            file_type = "excel"
-        elif "Image Analysis" in result_str:
-            file_type = "image"
-        elif "JSON Analysis" in result_str:
-            file_type = "json"
-        elif "Text Analysis" in result_str:
-            file_type = "text"
-        
-        # Try to extract file name from result
+    
+    def _create_error_result(self, file_path: str, error_message: str) -> CSVAnalysisResult:
+        """Create error result when analysis fails."""
         file_name = os.path.basename(file_path)
         
-        # Create basic structure
         structure = FileStructureInfo(
             file_name=file_name,
-            file_type=file_type,
-            file_path=file_path,
-            file_size_bytes=os.path.getsize(file_path) if os.path.exists(file_path) else None
+            file_type="csv",
+            file_path=file_path
         )
         
-        # Try to extract any structural information from text
-        # (This is optional - depends on how much you want to parse)
-        detected_patterns = []
-        if "tabular data" in result_str.lower():
-            detected_patterns.append("Contains tabular data")
-        if "header" in result_str.lower():
-            detected_patterns.append("Headers detected")
-        
-        # Check for errors
-        analysis_success = True
-        error_message = None
-        if result_str.startswith("Error"):
-            analysis_success = False
-            error_message = result_str
-        
-        # Return generic FileAnalysisResult
-        return FileAnalysisResult(
+        return CSVAnalysisResult(
             structure=structure,
-            content_preview=result_str[:2000],  # Store first 2000 chars
+            columns=[],
+            quality_metrics=DataQualityMetrics(),
             analysis_timestamp=datetime.now().isoformat(),
-            analysis_success=analysis_success,
-            error_message=error_message,
-            detected_patterns=detected_patterns
+            analysis_success=False,
+            error_message=error_message
         )

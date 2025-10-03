@@ -38,10 +38,15 @@ class Settings:
         self.llm_model = os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
         self.temperature = float(os.getenv("TEMPERATURE", DEFAULT_TEMPERATURE))
 
-        self.rag_collection_name = os.getenv("RAG_COLLECTION_NAME", DEFAULT_RAG_COLLECTION)
+        self.qdrant_collection_name = os.getenv("QDRANT_COLLECTION_NAME", DEFAULT_RAG_COLLECTION)
         self.top_k_results = int(os.getenv("TOP_K_RESULTS", "10"))
 
         self.max_refinements = int(os.getenv("MAX_REFINEMENTS", str(DEFAULT_MAX_REFINEMENTS)))
+
+        self.efficy_customer = os.getenv("EFFICY_CUSTOMER")
+        self.efficy_base_url = os.getenv("EFFICY_BASE_URL")
+        self.efficy_user = os.getenv("EFFICY_USER")
+        self.efficy_password = os.getenv("EFFICY_PASSWORD")
 
         self._validate()
 

@@ -16,9 +16,12 @@ FileType = Literal["csv", "excel", "json", "pdf", "image", "text", "xml", "unkno
 class ColumnMetadata:
     """Metadata for a single column/field in the analyzed file."""
     
+    # Required fields
     name: str
-    english_name: Optional[str] = None
     data_type: str
+
+    # Optional fields
+    english_name: Optional[str] = None
     translation_used: bool = False
     null_count: int = 0
     unique_count: int = 0

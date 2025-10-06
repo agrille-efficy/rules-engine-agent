@@ -5,8 +5,8 @@ Extracted from Agent_old/agent.py to provide a clean, typed state definition.
 """
 
 from typing import Optional, TypedDict
-from.file_analysis_model import FileAnalysisResult
-from .rag_match_model import TableMatchResult
+from .file_analysis_model import FileAnalysisResult
+from .rag_match_model import TableMatchResult, FieldMappingResult
 
 class WorkflowState(TypedDict, total=False):
     """
@@ -38,7 +38,6 @@ class WorkflowState(TypedDict, total=False):
     # Input fields
     messages: list
     file_path: str
-    user_context: Optional[str]
     table_preference: Optional[str]
     user_preferences: Optional[str]
     
@@ -71,7 +70,16 @@ class WorkflowState(TypedDict, total=False):
     # File analysis results
     file_analysis_result: Optional[FileAnalysisResult]
 
-    # RAG matching
+    # RAG matching (Step 2)
     rag_match_result: Optional[TableMatchResult]
+    
+    # Table selection (Step 3)
     selected_table: Optional[str]
     selected_schema: Optional[str]
+    selected_table_metadata: Optional[dict]
+    
+    # Field mapping (Step 4)
+    field_mapping_result: Optional[FieldMappingResult]
+
+    # Optional
+    user_context: Optional[str]

@@ -1,3 +1,5 @@
+import logging
+
 class EntityRelationMemory:
     """Memory storage for discovered entities and relations across the two-stage pipeline"""
     

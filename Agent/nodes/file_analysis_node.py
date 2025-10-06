@@ -1,5 +1,5 @@
-
 import os
+import logging
 from langchain_core.messages import HumanMessage
 from ..models.workflow_state import WorkflowState
 from ..services.file_analyzer import FileAnalyzerService
@@ -11,14 +11,14 @@ def file_analysis_node(state: WorkflowState) -> WorkflowState:
     Calls the analyze_file tool from tools.py
     """
     file_path = state['file_path']
-    print(f"STEP 1: Analyzing file structure and content for "
-          f"{file_path}...")
+    logging.info(f"STEP 1: Analyzing file structure and content for {file_path}")
 
     try:
         service = FileAnalyzerService()
         result = service.analyze(state['file_path'])
 
         if not result.analysis_success:
+            logging.error(f"File analysis failed: {result.error_message}")
             return {
                 **state,
                 "last_error": result.error_message,
@@ -30,9 +30,9 @@ def file_analysis_node(state: WorkflowState) -> WorkflowState:
                 "workflow_status": "failed"
             }
 
-        print(f"  File analyzed successfully")
-        print(f"    Rows: {result.structure.total_rows}")
-        print(f"    Columns: {result.structure.total_columns}")
+        logging.info(f"File analyzed successfully")
+        logging.info(f"  Rows: {result.structure.total_rows}")
+        logging.info(f"  Columns: {result.structure.total_columns}")
 
         basename = os.path.basename(state['file_path'])
         return {
@@ -51,7 +51,7 @@ def file_analysis_node(state: WorkflowState) -> WorkflowState:
 
     except Exception as e:
         error_msg = f"Exception in file analysis: {str(e)}"
-        print(f"  ERROR: {error_msg}")
+        logging.error(error_msg, exc_info=True)
         return {
             **state,
             "last_error": error_msg,

@@ -127,9 +127,82 @@ class MultiTableFieldMapper:
         candidate_tables: List[Dict],
         max_tables: int
     ) -> Dict:
-        """Get schemas for candidate tables."""
+        """
+        Get schemas for candidate tables.
+        Prioritizes a balanced mix of Entity and Relation tables.
+        Intelligently selects relationship tables based on relevance.
+        """
         table_schemas = {}
-        for table_info in candidate_tables[:max_tables]:
+        
+        # Separate entity and relation tables
+        entity_tables = []
+        relation_tables = []
+        
+        for table_info in candidate_tables:
+            table_kind = table_info.get('table_kind', 'Entity')
+            if table_kind == 'Entity':
+                entity_tables.append(table_info)
+            else:
+                relation_tables.append(table_info)
+        
+        # Fetch schemas with balanced approach:
+        # - At least 3 entity tables (primary + alternates)
+        # - Prioritize relationship tables that match common patterns
+        tables_to_fetch = []
+        
+        # Add top entity tables (at least 3, or all if fewer)
+        num_entities = min(3, len(entity_tables))
+        tables_to_fetch.extend(entity_tables[:num_entities])
+        
+        # Fill remaining slots with relationship tables (SMARTLY)
+        remaining_slots = max_tables - num_entities
+        if remaining_slots > 0 and relation_tables:
+            # Score relationship tables by their usefulness
+            scored_relations = []
+            for rel_table in relation_tables:
+                table_name = rel_table.get('table_name', '').lower()
+                score = rel_table.get('composite_score', 0.0)
+                
+                # Boost score for commonly needed relationship patterns
+                boost = 0.0
+                if '_comp' in table_name:  # Company relationships
+                    boost = 0.3
+                elif '_user' in table_name:  # User relationships
+                    boost = 0.3
+                elif '_cont' in table_name:  # Contact relationships
+                    boost = 0.2
+                elif 'intr_' in table_name or '_intr' in table_name:  # Interest/intervention
+                    boost = 0.2
+                elif '_prod' in table_name:  # Product relationships
+                    boost = 0.15
+                elif '_proj' in table_name:  # Project relationships
+                    boost = 0.15
+                
+                adjusted_score = score + boost
+                scored_relations.append((adjusted_score, rel_table))
+            
+            # Sort by adjusted score and take top ones
+            scored_relations.sort(key=lambda x: x[0], reverse=True)
+            top_relations = [rel for _, rel in scored_relations[:remaining_slots]]
+            tables_to_fetch.extend(top_relations)
+        
+        # If we still have room and more entities, add them
+        if len(tables_to_fetch) < max_tables and len(entity_tables) > num_entities:
+            remaining = max_tables - len(tables_to_fetch)
+            tables_to_fetch.extend(entity_tables[num_entities:num_entities + remaining])
+        
+        entity_count = len([t for t in tables_to_fetch if t.get('table_kind') == 'Entity'])
+        relation_count = len([t for t in tables_to_fetch if t.get('table_kind') == 'Relation'])
+        
+        logging.info(f"Fetching schemas: {entity_count} Entity, {relation_count} Relation tables")
+        
+        # Log which relationship tables we're prioritizing
+        rel_tables_names = [t.get('table_name') for t in tables_to_fetch if t.get('table_kind') == 'Relation']
+        if rel_tables_names:
+            logging.info(f"Prioritized relationship tables: {', '.join(rel_tables_names)}")
+        
+        # Fetch schemas
+        for table_info in tables_to_fetch:
             table_name = table_info.get('table_name')
             if not table_name:
                 continue
@@ -141,6 +214,8 @@ class MultiTableFieldMapper:
                     'table_type': table_info.get('table_kind', 'Entity'),
                     'rag_score': table_info.get('composite_score', 0.0)
                 }
+                logging.info(f"  ✓ {table_name} ({table_info.get('table_kind', 'Entity')}): {len(fields)} fields")
+        
         return table_schemas
     
     def _group_columns_semantically(
@@ -149,47 +224,92 @@ class MultiTableFieldMapper:
     ) -> Dict[str, List[str]]:
         """
         Group CSV columns by semantic domain.
+        Enhanced to better detect foreign keys and relationship fields.
         
         Returns:
             Dict mapping domain -> [column_names]
         """
         groups = {
-            'identification': [],
-            'company_info': [],
-            'contact_info': [],
-            'opportunity_info': [],
-            'financial': [],
-            'dates_times': [],
-            'status_metadata': [],
-            'relationships': [],
+            'entity_core': [],           # Core entity fields (name, status, type, nature)
+            'entity_metadata': [],       # Entity metadata (dates, flags, archived)
+            'entity_financial': [],      # Entity financial data (budget, amount, revenue)
+            'foreign_keys': [],          # Foreign key fields (compUniqueID, userUniqueID, etc.)
+            'user_references': [],       # User-related fields (responsible, creator, owner)
+            'company_references': [],    # Company-related fields (company name, etc.)
+            'contact_references': [],    # Contact-related fields
+            'relationship_data': [],     # Data that belongs in relationship tables (vat, specific IDs)
             'other': []
         }
         
         for column in file_analysis.columns:
-            col_name = (column.english_name or column.name).lower()
+            col_name = column.name
+            col_lower = (column.english_name or column.name).lower()
             
-            # Categorize by semantic patterns
-            if any(pattern in col_name for pattern in ['id', 'key', 'uniqueid', 'k_']):
-                groups['identification'].append(column.name)
-            elif any(pattern in col_name for pattern in ['company', 'comp', 'organization', 'compte', 'société']):
-                groups['company_info'].append(column.name)
-            elif any(pattern in col_name for pattern in ['contact', 'person', 'personne', 'responsible', 'owner']):
-                groups['contact_info'].append(column.name)
-            elif any(pattern in col_name for pattern in ['oppo', 'opportunity', 'deal', 'affaire', 'nature']):
-                groups['opportunity_info'].append(column.name)
-            elif any(pattern in col_name for pattern in ['amount', 'price', 'cost', 'revenue', 'montant', 'vat']):
-                groups['financial'].append(column.name)
-            elif any(pattern in col_name for pattern in ['date', 'time', 'created', 'updated', 'closing']):
-                groups['dates_times'].append(column.name)
-            elif any(pattern in col_name for pattern in ['status', 'state', 'stage', 'reason', 'statut']):
-                groups['status_metadata'].append(column.name)
-            elif any(pattern in col_name for pattern in ['ref', 'link', 'relation']):
-                groups['relationships'].append(column.name)
-            else:
-                groups['other'].append(column.name)
+            # Priority 1: Detect foreign keys (highest priority)
+            # Pattern: ends with UniqueID, _id, or contains ID patterns
+            if (col_lower.endswith('uniqueid') or 
+                col_lower.endswith('_id') or 
+                (col_lower != 'id' and '_id' in col_lower)):
+                groups['foreign_keys'].append(col_name)
+                continue
+            
+            # Priority 2: Detect user/person references
+            if any(pattern in col_lower for pattern in ['responsible', 'creator', 'owner', 'personne', 'charge', 'assignee']):
+                groups['user_references'].append(col_name)
+                continue
+            
+            # Priority 3: Detect company references (but not if already FK)
+            if any(pattern in col_lower for pattern in ['company', 'comp', 'compte', 'société', 'organization']):
+                # Check if it's about company name vs company ID
+                if 'nom' in col_lower or 'name' in col_lower:
+                    groups['company_references'].append(col_name)
+                else:
+                    groups['company_references'].append(col_name)
+                continue
+            
+            # Priority 4: Detect contact references
+            if any(pattern in col_lower for pattern in ['contact', 'cont']) and 'id' not in col_lower:
+                groups['contact_references'].append(col_name)
+                continue
+            
+            # Priority 5: Detect relationship-specific data
+            if any(pattern in col_lower for pattern in ['intr_', 'vat', 'intervention', 'interest']):
+                groups['relationship_data'].append(col_name)
+                continue
+            
+            # Priority 6: Core entity fields
+            if any(pattern in col_lower for pattern in ['oppo', 'opportunity', 'deal', 'affaire']) and \
+               any(pattern in col_lower for pattern in ['name', 'status', 'type', 'nature', 'reason', 'nom', 'statut']):
+                groups['entity_core'].append(col_name)
+                continue
+            
+            # Priority 7: Entity metadata
+            if any(pattern in col_lower for pattern in ['date', 'time', 'created', 'updated', 'sys', 'archived', 'banner']):
+                groups['entity_metadata'].append(col_name)
+                continue
+            
+            # Priority 8: Financial data
+            if any(pattern in col_lower for pattern in ['amount', 'price', 'cost', 'revenue', 'budget', 'montant', 'loyer', 'capex', 'vente']):
+                groups['entity_financial'].append(col_name)
+                continue
+            
+            # Priority 9: Opportunity-specific fields (custom fields)
+            if col_lower.startswith('oppo'):
+                groups['entity_core'].append(col_name)
+                continue
+            
+            # Default: other
+            groups['other'].append(col_name)
         
         # Remove empty groups
-        return {k: v for k, v in groups.items() if v}
+        filtered_groups = {k: v for k, v in groups.items() if v}
+        
+        # Log the grouping results
+        logging.info(f"Semantic grouping results:")
+        for group_name, columns in filtered_groups.items():
+            logging.info(f"  {group_name}: {len(columns)} columns")
+        
+        return filtered_groups
     
     def _map_columns_to_all_tables(
         self,
@@ -247,11 +367,11 @@ class MultiTableFieldMapper:
         Intelligently assign columns to multiple tables.
         
         Strategy:
-        1. If primary_table is specified, prioritize mapping to it first
-        2. Group columns by semantic domain
-        3. Find best table for each domain group
-        4. Assign columns to tables based on group affinity and table type
-        5. Force distribution when appropriate (avoid putting everything in one table)
+        1. If primary_table is specified, prioritize mapping to it first (but exclude FKs)
+        2. Explicitly map foreign keys and relationship fields to relationship tables
+        3. Group remaining columns by semantic domain
+        4. Find best table for each domain group
+        5. Assign columns to tables based on group affinity and table type
         
         Returns:
             Dict mapping table_name -> [FieldMapping, ...]
@@ -274,16 +394,31 @@ class MultiTableFieldMapper:
         # Step 2: Track which tables have been used
         table_usage = {table: 0 for table in table_schemas.keys()}
         
-        # Step 3: If primary_table is specified, try to map as many columns as possible to it first
+        # Step 3: If primary_table is specified, map entity fields (but NOT foreign keys)
         if primary_table and primary_table in table_schemas:
-            logging.info(f"=== PRIMARY TABLE PRIORITIZATION: {primary_table} ===")
+            logging.info(f"=== PRIMARY TABLE MAPPING (SELECTIVE): {primary_table} ===")
             primary_table_meta = table_metadata_lookup.get(primary_table, {})
             primary_table_type = primary_table_meta.get('table_kind', 'Entity')
             logging.info(f"Primary table type: {primary_table_type}")
             
+            # Collect columns to exclude from primary table mapping
+            exclude_columns = set()
+            exclude_columns.update(column_groups.get('foreign_keys', []))
+            exclude_columns.update(column_groups.get('user_references', []))
+            exclude_columns.update(column_groups.get('company_references', []))
+            exclude_columns.update(column_groups.get('contact_references', []))
+            exclude_columns.update(column_groups.get('relationship_data', []))
+            
+            if exclude_columns:
+                logging.info(f"Excluding {len(exclude_columns)} FK/relationship columns from primary table")
+            
             primary_assigned = 0
             
             for col_name, candidates in column_to_table_mappings.items():
+                # Skip foreign keys and relationship fields
+                if col_name in exclude_columns:
+                    continue
+                
                 # Find mapping for primary table
                 primary_mapping = next(
                     (c['mapping'] for c in candidates if c['table'] == primary_table),
@@ -296,11 +431,73 @@ class MultiTableFieldMapper:
                     primary_assigned += 1
             
             table_usage[primary_table] = primary_assigned
-            logging.info(f"Assigned {primary_assigned} columns to primary table: {primary_table}")
+            logging.info(f"Assigned {primary_assigned} entity columns to primary table: {primary_table}")
+        
+        # Step 3.5: EXPLICIT RELATIONSHIP TABLE MAPPING for foreign keys
+        logging.info(f"=== RELATIONSHIP TABLE MAPPING ===")
+        
+        # Get relationship tables
+        relation_tables = [
+            table for table in table_schemas.keys()
+            if table_metadata_lookup.get(table, {}).get('table_kind') == 'Relation'
+        ]
+        
+        logging.info(f"Found {len(relation_tables)} relationship tables to check")
+        
+        # Get all foreign key and relationship columns
+        fk_columns = []
+        fk_columns.extend(column_groups.get('foreign_keys', []))
+        fk_columns.extend(column_groups.get('user_references', []))
+        fk_columns.extend(column_groups.get('company_references', []))
+        fk_columns.extend(column_groups.get('contact_references', []))
+        fk_columns.extend(column_groups.get('relationship_data', []))
+        
+        relationship_mapped = 0
+        
+        for col_name in fk_columns:
+            if col_name in assigned_columns:
+                continue
+            
+            candidates = column_to_table_mappings.get(col_name, [])
+            if not candidates:
+                continue
+            
+            # Try to find the best relationship table for this column
+            best_relation_match = None
+            best_relation_confidence = 0.0
+            
+            for candidate in candidates:
+                table = candidate['table']
+                mapping = candidate['mapping']
+                confidence = mapping.confidence_score
+                
+                # Check if this is a relationship table
+                if table in relation_tables:
+                    # Use lower threshold for relationship tables (0.3 instead of 0.5)
+                    if confidence >= 0.3 and confidence > best_relation_confidence:
+                        # Additional check: does the table name match the column pattern?
+                        is_good_match = self._is_good_relationship_match(
+                            col_name, table, primary_table
+                        )
+                        
+                        if is_good_match or confidence >= 0.5:
+                            best_relation_match = (table, mapping)
+                            best_relation_confidence = confidence
+            
+            # Assign to best relationship table
+            if best_relation_match:
+                rel_table, rel_mapping = best_relation_match
+                table_assignments[rel_table].append(rel_mapping)
+                assigned_columns.add(col_name)
+                table_usage[rel_table] += 1
+                relationship_mapped += 1
+                logging.info(f"  → FK/Relation '{col_name}' → '{rel_table}' (confidence: {best_relation_confidence:.2f})")
+        
+        logging.info(f"Mapped {relationship_mapped} foreign key/relationship columns to relationship tables")
         
         # Step 4: Assign remaining columns by semantic groups
         for group_name, columns in column_groups.items():
-            # Skip columns already assigned to primary table
+            # Skip columns already assigned
             remaining_cols = [c for c in columns if c not in assigned_columns]
             if not remaining_cols:
                 continue
@@ -312,8 +509,7 @@ class MultiTableFieldMapper:
                 logging.debug(f"No table affinity found for group '{group_name}'")
                 continue
             
-            # Choose best table for this group (prefer unused tables for distribution)
-            # Priority: Entity tables > Relation tables, unused > used, high affinity > low affinity
+            # Choose best table for this group
             target_table = None
             best_affinity = 0.0
             
@@ -340,25 +536,10 @@ class MultiTableFieldMapper:
                 if is_unused:
                     adjusted_affinity += 0.05
                 
-                # Accept table if:
-                # 1. It has good adjusted affinity (>0.4), OR
-                # 2. It's the best we've seen so far and meets minimum threshold (>0.3)
-                if adjusted_affinity >= 0.4 and adjusted_affinity > best_affinity:
+                # Accept table if it meets threshold
+                if adjusted_affinity >= 0.3 and adjusted_affinity > best_affinity:
                     target_table = table
                     best_affinity = adjusted_affinity
-                    break
-                elif adjusted_affinity >= 0.3 and adjusted_affinity > best_affinity:
-                    target_table = table
-                    best_affinity = adjusted_affinity
-            
-            # Fallback to best table (skip primary if already used)
-            if not target_table and best_tables:
-                for table_info in best_tables:
-                    if primary_table and table_info['table'] == primary_table:
-                        continue
-                    target_table = table_info['table']
-                    best_affinity = table_info['affinity']
-                    break
             
             if not target_table:
                 continue
@@ -379,7 +560,7 @@ class MultiTableFieldMapper:
                     None
                 )
                 
-                # If no mapping for target table, use best available (excluding primary if already used)
+                # If no mapping for target table, use best available
                 if not target_mapping and candidates:
                     for candidate in candidates:
                         if primary_table and candidate['table'] == primary_table:
@@ -403,17 +584,66 @@ class MultiTableFieldMapper:
             if col_name in assigned_columns or not candidates:
                 continue
             
-            # Assign to best matching table
-            best_candidate = candidates[0]
-            table_assignments[best_candidate['table']].append(best_candidate['mapping'])
-            assigned_columns.add(col_name)
-            table_usage[best_candidate['table']] += 1
-            remaining += 1
+            # Assign to best matching table (with lower threshold for leftovers)
+            for candidate in candidates:
+                if candidate['mapping'].confidence_score >= 0.3:
+                    table = candidate['table']
+                    table_assignments[table].append(candidate['mapping'])
+                    assigned_columns.add(col_name)
+                    table_usage[table] += 1
+                    remaining += 1
+                    break
         
         if remaining > 0:
             logging.info(f"Assigned {remaining} remaining columns to their best-match tables")
         
         return table_assignments
+    
+    def _is_good_relationship_match(
+        self,
+        column_name: str,
+        relation_table: str,
+        primary_table: str
+    ) -> bool:
+        """
+        Check if a column is a good semantic match for a relationship table.
+        
+        Examples:
+        - compUniqueID should match Oppo_Comp
+        - responsible should match Oppo_User
+        - intr_vat should match Intr_Oppo
+        """
+        col_lower = column_name.lower()
+        table_lower = relation_table.lower()
+        
+        # Pattern 1: Column contains entity prefix that's in the table name
+        # Example: compUniqueID matches Oppo_Comp
+        entity_patterns = {
+            'comp': ['comp', 'company'],
+            'user': ['user', 'responsible', 'creator', 'owner'],
+            'cont': ['cont', 'contact'],
+            'prod': ['prod', 'product'],
+            'intr': ['intr', 'interest', 'intervention'],
+            'proj': ['proj', 'project'],
+            'lead': ['lead'],
+            'camp': ['camp', 'campaign']
+        }
+        
+        for entity_prefix, patterns in entity_patterns.items():
+            # Check if column matches any pattern
+            if any(pattern in col_lower for pattern in patterns):
+                # Check if the relationship table contains this entity prefix
+                if entity_prefix in table_lower:
+                    return True
+        
+        # Pattern 2: Check if primary table is in the relation table name
+        # (All relationship tables should connect to the primary entity)
+        if primary_table and primary_table.lower() in table_lower:
+            # Additional check: does the column suggest this relationship?
+            if any(pattern in col_lower for pattern in ['comp', 'user', 'cont', 'prod', 'intr']):
+                return True
+        
+        return False
     
     def _calculate_group_table_affinity(
         self,

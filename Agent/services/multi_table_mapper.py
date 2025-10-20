@@ -55,6 +55,7 @@ class MultiTableFieldMapper:
         self,
         file_analysis: FileAnalysisResult,
         candidate_tables: List[Dict],
+        primary_table: str = None,
         max_tables: int = 5
     ) -> MultiTableMappingResult:
         """
@@ -63,6 +64,7 @@ class MultiTableFieldMapper:
         Args:
             file_analysis: Result from file analysis
             candidate_tables: List of candidate tables from RAG (with scores)
+            primary_table: The selected primary table to prioritize for mapping
             max_tables: Maximum number of tables to map to
             
         Returns:
@@ -70,6 +72,8 @@ class MultiTableFieldMapper:
         """
         logging.info(f"Starting multi-table mapping for {file_analysis.structure.file_name}")
         logging.info(f"Evaluating {len(candidate_tables)} candidate tables")
+        if primary_table:
+            logging.info(f"Primary table specified: {primary_table}")
         
         # Step 1: Get schemas for all candidate tables
         table_schemas = self._get_candidate_schemas(candidate_tables, max_tables)
@@ -90,13 +94,15 @@ class MultiTableFieldMapper:
             column_to_table_mappings,
             column_groups,
             table_schemas,
-            candidate_tables
+            candidate_tables,
+            primary_table  # Pass the primary table
         )
         
         # Step 5: Validate and filter tables
         valid_table_mappings = self._filter_and_validate_table_mappings(
             table_assignments,
-            file_analysis
+            file_analysis,
+            candidate_tables  # Pass candidate_tables for metadata lookup
         )
         
         # Step 6: Determine insertion order (parent tables first)
@@ -234,22 +240,29 @@ class MultiTableFieldMapper:
         column_to_table_mappings: Dict[str, List[Dict]],
         column_groups: Dict[str, List[str]],
         table_schemas: Dict,
-        candidate_tables: List[Dict]
+        candidate_tables: List[Dict],
+        primary_table: str = None
     ) -> Dict[str, List[FieldMapping]]:
         """
         Intelligently assign columns to multiple tables.
         
         Strategy:
-        1. Group columns by semantic domain
-        2. Find best table for each domain group
-        3. Assign columns to tables based on group affinity
-        4. Force distribution when appropriate (avoid putting everything in one table)
+        1. If primary_table is specified, prioritize mapping to it first
+        2. Group columns by semantic domain
+        3. Find best table for each domain group
+        4. Assign columns to tables based on group affinity and table type
+        5. Force distribution when appropriate (avoid putting everything in one table)
         
         Returns:
             Dict mapping table_name -> [FieldMapping, ...]
         """
         table_assignments = {table: [] for table in table_schemas.keys()}
         assigned_columns = set()
+        
+        # Create lookup for table metadata from candidate_tables
+        table_metadata_lookup = {
+            t['table_name']: t for t in candidate_tables
+        }
         
         # Step 1: Find table affinities for each semantic group
         group_to_table_affinity = self._calculate_group_table_affinity(
@@ -261,8 +274,37 @@ class MultiTableFieldMapper:
         # Step 2: Track which tables have been used
         table_usage = {table: 0 for table in table_schemas.keys()}
         
-        # Step 3: Assign columns by semantic groups with diversity preference
+        # Step 3: If primary_table is specified, try to map as many columns as possible to it first
+        if primary_table and primary_table in table_schemas:
+            logging.info(f"=== PRIMARY TABLE PRIORITIZATION: {primary_table} ===")
+            primary_table_meta = table_metadata_lookup.get(primary_table, {})
+            primary_table_type = primary_table_meta.get('table_kind', 'Entity')
+            logging.info(f"Primary table type: {primary_table_type}")
+            
+            primary_assigned = 0
+            
+            for col_name, candidates in column_to_table_mappings.items():
+                # Find mapping for primary table
+                primary_mapping = next(
+                    (c['mapping'] for c in candidates if c['table'] == primary_table),
+                    None
+                )
+                
+                if primary_mapping:
+                    table_assignments[primary_table].append(primary_mapping)
+                    assigned_columns.add(col_name)
+                    primary_assigned += 1
+            
+            table_usage[primary_table] = primary_assigned
+            logging.info(f"Assigned {primary_assigned} columns to primary table: {primary_table}")
+        
+        # Step 4: Assign remaining columns by semantic groups
         for group_name, columns in column_groups.items():
+            # Skip columns already assigned to primary table
+            remaining_cols = [c for c in columns if c not in assigned_columns]
+            if not remaining_cols:
+                continue
+            
             # Get best table(s) for this group
             best_tables = group_to_table_affinity.get(group_name, [])
             
@@ -270,61 +312,92 @@ class MultiTableFieldMapper:
                 logging.debug(f"No table affinity found for group '{group_name}'")
                 continue
             
-            # Choose primary table for this group
-            # Prefer tables that haven't been used yet (to encourage distribution)
-            primary_table = None
+            # Choose best table for this group (prefer unused tables for distribution)
+            # Priority: Entity tables > Relation tables, unused > used, high affinity > low affinity
+            target_table = None
+            best_affinity = 0.0
+            
             for table_info in best_tables:
                 table = table_info['table']
                 affinity = table_info['affinity']
                 
-                # Accept table if:
-                # 1. It has good affinity (>0.4), OR
-                # 2. It's unused and has reasonable affinity (>0.3)
-                if affinity >= 0.4:
-                    primary_table = table
-                    break
-                elif table_usage[table] == 0 and affinity >= 0.3:
-                    primary_table = table
-                    break
-            
-            # Fallback to best table
-            if not primary_table and best_tables:
-                primary_table = best_tables[0]['table']
-            
-            if not primary_table:
-                continue
-            
-            logging.info(f"Group '{group_name}' ({len(columns)} cols) → Table '{primary_table}' (affinity: {best_tables[0]['affinity']:.2f})")
-            
-            # Assign columns from this group to the primary table
-            assigned_count = 0
-            for col_name in columns:
-                if col_name in assigned_columns:
+                # Skip if this is the primary table and we already mapped it
+                if primary_table and table == primary_table:
                     continue
                 
+                # Get table type from metadata
+                table_meta = table_metadata_lookup.get(table, {})
+                table_type = table_meta.get('table_kind', 'Entity')
+                is_entity = table_type == 'Entity'
+                is_unused = table_usage[table] == 0
+                
+                # Scoring system:
+                # - Entity tables get +0.1 bonus
+                # - Unused tables get +0.05 bonus
+                adjusted_affinity = affinity
+                if is_entity:
+                    adjusted_affinity += 0.1
+                if is_unused:
+                    adjusted_affinity += 0.05
+                
+                # Accept table if:
+                # 1. It has good adjusted affinity (>0.4), OR
+                # 2. It's the best we've seen so far and meets minimum threshold (>0.3)
+                if adjusted_affinity >= 0.4 and adjusted_affinity > best_affinity:
+                    target_table = table
+                    best_affinity = adjusted_affinity
+                    break
+                elif adjusted_affinity >= 0.3 and adjusted_affinity > best_affinity:
+                    target_table = table
+                    best_affinity = adjusted_affinity
+            
+            # Fallback to best table (skip primary if already used)
+            if not target_table and best_tables:
+                for table_info in best_tables:
+                    if primary_table and table_info['table'] == primary_table:
+                        continue
+                    target_table = table_info['table']
+                    best_affinity = table_info['affinity']
+                    break
+            
+            if not target_table:
+                continue
+            
+            # Log with table type information
+            target_meta = table_metadata_lookup.get(target_table, {})
+            target_type = target_meta.get('table_kind', 'Entity')
+            logging.info(f"Group '{group_name}' ({len(remaining_cols)} cols) → Table '{target_table}' ({target_type}, affinity: {best_affinity:.2f})")
+            
+            # Assign remaining columns from this group
+            assigned_count = 0
+            for col_name in remaining_cols:
                 candidates = column_to_table_mappings.get(col_name, [])
                 
-                # Find mapping for the primary table
-                primary_mapping = next(
-                    (c['mapping'] for c in candidates if c['table'] == primary_table),
+                # Find mapping for the target table
+                target_mapping = next(
+                    (c['mapping'] for c in candidates if c['table'] == target_table),
                     None
                 )
                 
-                # If no mapping for primary table, use best available
-                if not primary_mapping and candidates:
-                    primary_mapping = candidates[0]['mapping']
-                    primary_table = candidates[0]['table']
+                # If no mapping for target table, use best available (excluding primary if already used)
+                if not target_mapping and candidates:
+                    for candidate in candidates:
+                        if primary_table and candidate['table'] == primary_table:
+                            continue
+                        target_mapping = candidate['mapping']
+                        target_table = candidate['table']
+                        break
                 
-                if primary_mapping:
-                    table_assignments[primary_table].append(primary_mapping)
+                if target_mapping:
+                    table_assignments[target_table].append(target_mapping)
                     assigned_columns.add(col_name)
                     assigned_count += 1
             
             if assigned_count > 0:
-                table_usage[primary_table] += assigned_count
-                logging.info(f"  → Assigned {assigned_count} columns to {primary_table}")
+                table_usage[target_table] += assigned_count
+                logging.info(f"  → Assigned {assigned_count} columns to {target_table}")
         
-        # Step 4: Assign remaining unmapped columns to their best table
+        # Step 5: Assign any remaining unmapped columns to their best table
         remaining = 0
         for col_name, candidates in column_to_table_mappings.items():
             if col_name in assigned_columns or not candidates:
@@ -400,11 +473,17 @@ class MultiTableFieldMapper:
     def _filter_and_validate_table_mappings(
         self,
         table_groups: Dict[str, List[FieldMapping]],
-        file_analysis: FileAnalysisResult
+        file_analysis: FileAnalysisResult,
+        candidate_tables: List[Dict]
     ) -> List[TableFieldMapping]:
         """
         Filter tables that have too few mappings and validate each table's mappings.
         """
+        # Create lookup for table metadata
+        table_metadata_lookup = {
+            t['table_name']: t for t in candidate_tables
+        }
+        
         valid_mappings = []
         
         for table_name, mappings in table_groups.items():
@@ -425,12 +504,9 @@ class MultiTableFieldMapper:
             # Calculate table confidence
             avg_confidence = sum(m.confidence_score for m in mappings) / len(mappings) if mappings else 0.0
             
-            # Determine table type (try to get from RAG metadata)
-            # For now, infer from table name patterns
-            table_type = "Entity"
-            if '_' in table_name and len(table_name.split('_')) == 2:
-                # Likely a relation table (e.g., Docu_Oppo, Oppo_Prod)
-                table_type = "Relation"
+            # Get table type from metadata (not from name pattern)
+            table_meta = table_metadata_lookup.get(table_name, {})
+            table_type = table_meta.get('table_kind', 'Entity')
             
             table_mapping = TableFieldMapping(
                 table_name=table_name,

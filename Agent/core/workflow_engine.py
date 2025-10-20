@@ -128,9 +128,10 @@ class WorkflowEngine:
         final_state = None
         
         # Configure execution with thread_id for checkpointing
+        sanitized_path = initial_state['file_path'].replace('/', '_').replace('\\', '_')
         config = {
             "configurable": {
-                "thread_id": f"workflow_{initial_state['file_path'].replace('/', '_').replace('\\', '_')}"
+                "thread_id": f"workflow_{sanitized_path}"
             }
         }
         

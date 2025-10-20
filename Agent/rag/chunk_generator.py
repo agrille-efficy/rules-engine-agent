@@ -23,8 +23,17 @@ class TableIngestionChunkBuilder:
         tables_df = pd.DataFrame.from_dict(tables_raw.values(), orient='columns')
         fields_df = pd.DataFrame.from_dict(fields_raw.values(), orient='columns')
 
-        self.tables_df = tables_df[tables_df['stblKTable'].notna()] if 'stblKTable' in tables_df.columns else tables_df
-        self.fields_df = fields_df[fields_df['sfldKTable'].notna()] if 'sfldKTable' in self.fields_df.columns else fields_df
+        # Fix: Assign to self first, then filter
+        self.tables_df = tables_df
+        self.fields_df = fields_df
+        
+        # Now filter based on the assigned dataframes
+        if 'stblKTable' in self.tables_df.columns:
+            self.tables_df = self.tables_df[self.tables_df['stblKTable'].notna()]
+        
+        if 'sfldKTable' in self.fields_df.columns:
+            self.fields_df = self.fields_df[self.fields_df['sfldKTable'].notna()]
+        
         self.cleaned_tables = [t for t in tables_raw.values() if t['stblKind'] in ['E','R']]
         self.fields_index = self.fields_df.groupby('sfldKTable') if 'sfldKTable' in self.fields_df.columns else {}
         self._table_by_k = {t['stblKTable']: t for t in self.cleaned_tables}

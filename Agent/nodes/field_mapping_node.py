@@ -46,13 +46,23 @@ def field_mapping_node(state: WorkflowState) -> WorkflowState:
                 'query_coverage': match.metadata.get('query_coverage', 0) if match.metadata else 0,
             })
         
+        # Prioritize selected table by moving it to the front of the candidate list
+        if selected_table:
+            logging.info(f"Prioritizing selected table: {selected_table}")
+            candidate_tables.sort(
+                key=lambda t: 0 if t['table_name'] == selected_table else 1
+            )
+        
         logging.info(f"Using multi-table mapper with {len(candidate_tables)} candidate tables")
+        if selected_table:
+            logging.info(f"Primary table for mapping: {selected_table}")
         
         # Initialize multi-table mapper and perform mapping
         mapper = MultiTableFieldMapper()
         mapping_result = mapper.map_to_multiple_tables(
             file_analysis,
             candidate_tables,
+            primary_table=selected_table,
             max_tables=5  # Map to up to 5 tables
         )
         

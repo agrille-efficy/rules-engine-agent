@@ -34,7 +34,7 @@ class DicoAPI:
                     'X-Requested-With': 'XMLHttpRequest',
                     'Content-Type': 'application/x-www-form-urlencoded'
                 },
-                data=f'user={settings.efficy_username}&password={settings.efficy_password}'
+                data=f'user={settings.efficy_user}&password={settings.efficy_password}'
             )
 
             if login_response.status_code == 200:

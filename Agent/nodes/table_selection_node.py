@@ -49,11 +49,30 @@ def table_selection_node(state: WorkflowState) -> WorkflowState:
             if not selected_match:
                 logging.warning(f"User preference '{user_preference}' not found in matches, using best match")
         
-        # If no user preference or preference not found, use primary match (highest score)
+        # If no user preference or preference not found, use smart selection
         if not selected_match:
-            selected_match = rag_result.primary_match
-            selection_reason = f"Highest confidence match (score: {selected_match.similarity_score:.2f})"
-            logging.info(f"Auto-selected best match: {selected_match.table_name}")
+            # Smart selection: Prefer Entity tables over Relationship tables for primary table
+            entity_tables = []
+            relation_tables = []
+            
+            for match in rag_result.matched_tables:
+                table_kind = match.metadata.get('table_kind', 'Entity') if match.metadata else 'Entity'
+                if table_kind == 'Entity':
+                    entity_tables.append(match)
+                else:
+                    relation_tables.append(match)
+            
+            # Prefer the highest-scoring Entity table as primary
+            if entity_tables:
+                selected_match = entity_tables[0]  # Already sorted by score
+                selection_reason = f"Best Entity table (score: {selected_match.similarity_score:.2f})"
+                logging.info(f"Auto-selected best Entity table: {selected_match.table_name}")
+            else:
+                # Fallback to highest score overall (even if it's a relationship table)
+                selected_match = rag_result.primary_match
+                selection_reason = f"Highest confidence match (score: {selected_match.similarity_score:.2f})"
+                logging.info(f"Auto-selected best match: {selected_match.table_name}")
+                logging.warning("No Entity tables found, selected a Relationship table as primary")
         
         # Log selection details
         logging.info(f"Selected table: {selected_match.table_name}")

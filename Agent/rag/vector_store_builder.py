@@ -97,6 +97,11 @@ def feed_vector_store(dico_api, qdrant_client, embeddings, collection_name):
             field_name="primary_table",
             field_schema=PayloadSchemaType.KEYWORD
         )
+        qdrant_client.create_payload_index(
+            collection_name=collection_name,
+            field_name="table_kind",
+            field_schema=PayloadSchemaType.KEYWORD
+        )
         logging.info('Payload indexes created successfully.')
     except Exception as e:
         logging.error(f"Error creating payload indexes: {str(e)}")

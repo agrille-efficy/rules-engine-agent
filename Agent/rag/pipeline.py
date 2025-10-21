@@ -8,8 +8,6 @@ import pandas as pd
 import logging
 from typing import Optional
 
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-
 from ..config import get_settings
 from ..models.validators import (
     PipelineInput, 
@@ -26,23 +24,35 @@ from .utils import calculate_confidence_level
 
 settings = get_settings()
 
-def _get_llm() -> ChatOpenAI:
-    return ChatOpenAI(
-        model=settings.llm_model,
+def _get_llm():
+    """Get resilient OpenAI client for chat completions."""
+    from ..services.clients import ResilientOpenAIClient
+    return ResilientOpenAIClient(
         api_key=settings.openai_api_key,
-        temperature=settings.temperature
+        model=settings.llm_model,
+        temperature=settings.temperature,
+        max_retries=3
     )
 
-def _get_embeddings_model() -> OpenAIEmbeddings:
-    return OpenAIEmbeddings(
-        api_key=settings.openai_api_key
+def _get_embeddings_model():
+    """Get resilient OpenAI client for embeddings (reuses chat client)."""
+    from ..services.clients import ResilientOpenAIClient
+    client = ResilientOpenAIClient(
+        api_key=settings.openai_api_key,
+        model=settings.llm_model,
+        temperature=settings.temperature,
+        max_retries=3
     )
+    # Return the embeddings property which provides the OpenAIEmbeddings instance
+    return client.embeddings
 
 def _get_vector_store():
-    from qdrant_client import QdrantClient
-    return QdrantClient(
+    """Get resilient Qdrant client with retry logic and circuit breaker."""
+    from ..services.clients import ResilientQdrantClient
+    return ResilientQdrantClient(
         url=settings.qdrant_url,
-        api_key=settings.qdrant_api_key
+        api_key=settings.qdrant_api_key,
+        max_retries=3
     )
 
 # Initialize logger
@@ -51,12 +61,57 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logging.info("Dependencies loaded successfully.")
 logging.info("Environment variables loaded successfully.")
 
-# Initialize clients
-openai_client = _get_llm()
-embeddings = _get_embeddings_model()
-qdrant_client = _get_vector_store()
+# Initialize clients lazily - only when accessed to avoid circular imports
+_openai_client_cache = None
+_embeddings_cache = None
+_qdrant_client_cache = None
 
-logging.info("OpenAI and Qdrant clients initialized successfully.")
+def _get_cached_openai_client():
+    """Get or create cached OpenAI client."""
+    global _openai_client_cache
+    if (_openai_client_cache is None):
+        _openai_client_cache = _get_llm()
+        logging.info("OpenAI client initialized successfully with resilience features.")
+    return _openai_client_cache
+
+def _get_cached_embeddings():
+    """Get or create cached embeddings client."""
+    global _embeddings_cache
+    if (_embeddings_cache is None):
+        _embeddings_cache = _get_embeddings_model()
+        logging.info("Embeddings client initialized successfully with resilience features.")
+    return _embeddings_cache
+
+def _get_cached_qdrant_client():
+    """Get or create cached Qdrant client."""
+    global _qdrant_client_cache
+    if (_qdrant_client_cache is None):
+        _qdrant_client_cache = _get_vector_store()
+        logging.info("Qdrant client initialized successfully with resilience features.")
+    return _qdrant_client_cache
+
+# Expose lazy-loaded clients through properties
+@property
+def openai_client():
+    return _get_cached_openai_client()
+
+@property
+def embeddings():
+    return _get_cached_embeddings()
+
+@property  
+def qdrant_client():
+    return _get_cached_qdrant_client()
+
+# For backward compatibility, also expose as module-level getters
+def get_openai_client():
+    return _get_cached_openai_client()
+
+def get_embeddings():
+    return _get_cached_embeddings()
+
+def get_qdrant_client():
+    return _get_cached_qdrant_client()
 
 
 class GenericFileIngestionRAGPipeline:
@@ -77,11 +132,21 @@ class GenericFileIngestionRAGPipeline:
         self.translator = UniversalTranslator()
         self.domain_classifier = DomainClassifier()
         self.query_generator = QueryGenerator(self.translator)
-        self.vector_search = VectorSearchService(qdrant_client, embeddings, collection_name)
+        
+        # Use resilient client's underlying client for VectorSearchService
+        # If it's a ResilientQdrantClient, access the .client property
+        actual_client = qdrant_client.client if hasattr(qdrant_client, 'client') else qdrant_client
+        self.vector_search = VectorSearchService(actual_client, embeddings, collection_name)
         
         # Verify collection exists in query-only mode
         if self.query_only:
-            existing_collections = [col.name for col in self.qdrant_client.get_collections().collections]
+            # Use resilient client method if available, otherwise direct access
+            if hasattr(qdrant_client, 'get_collections'):
+                collections = qdrant_client.get_collections()
+            else:
+                collections = qdrant_client.get_collections()
+            
+            existing_collections = [col.name for col in collections.collections]
             if self.collection_name not in existing_collections:
                 raise ValueError(f"Collection '{self.collection_name}' does not exist. Please run the RAG system in 'feed' mode first to populate the vector store.")
             logging.info(f"Query-only mode: Using existing collection '{self.collection_name}'")
@@ -399,6 +464,10 @@ def main():
     )
     
     collection_name = "maxo_vector_store_v2"
+    
+    # Initialize clients lazily for feed mode
+    qdrant_client = _get_cached_qdrant_client()
+    embeddings = _get_cached_embeddings()
     
     success = feed_vector_store(dico_getter, qdrant_client, embeddings, collection_name)
     if success:

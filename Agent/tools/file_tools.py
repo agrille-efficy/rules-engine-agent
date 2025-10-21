@@ -5,7 +5,6 @@ import numpy as np
 import json
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
 
 
 try:
@@ -29,19 +28,22 @@ except ImportError:
 PDF_AVAILABLE = PDFPLUMBER_AVAILABLE and PYMUPDF_AVAILABLE
 
 
-def _get_vision_llm() -> ChatOpenAI:
+def _get_vision_llm():
     """
-    Initialize a vision-capable language model for OCR tasks.
+    Initialize a resilient vision-capable language model for OCR tasks.
 
     Returns: 
-        ChatOpenAI: An instance of ChatOpenAI configured for vision tasks.
+        ResilientOpenAIClient: A resilient OpenAI client configured for vision tasks.
     """
     from ..config.settings import get_settings
+    from ..services.clients import ResilientOpenAIClient
+    
     settings = get_settings()
-    return ChatOpenAI(
-        model=settings.llm_model,
+    return ResilientOpenAIClient(
         api_key=settings.openai_api_key,
-        temperature=settings.temperature
+        model=settings.llm_model,
+        temperature=settings.temperature,
+        max_retries=3
     )
 
 
@@ -80,7 +82,7 @@ def analyze_file(file_path: str) -> str:
     except Exception as e:
         return f"Error analyzing file: {str(e)}"
 
-def _analyze_pdf(file_path: str, vision_llm: ChatOpenAI) -> str:
+def _analyze_pdf(file_path: str, vision_llm) -> str:
     """Analyze PDF files with text extraction and OCR fallback."""
     if not PDF_AVAILABLE:
         return "Error: PDF processing libraries not installed. Please install PyPDF2, pdfplumber, and PyMuPDF."
@@ -157,7 +159,7 @@ def _analyze_csv(file_path: str) -> str:
     """Analyze CSV files for database mapping discovery."""
     
     class NumpyEncoder(json.JSONEncoder):
-        """Handle numpy types in JSON serialization."""
+        """Handle numpy types in JSON serialization.""" 
         def default(self, obj):
             if isinstance(obj, (np.integer, np.int64, np.int32)):
                 return int(obj)
@@ -316,7 +318,7 @@ def _analyze_json(file_path: str) -> str:
     except Exception as e:
         return f"Error analyzing JSON: {str(e)}"
 
-def _analyze_image(file_path: str, vision_llm: ChatOpenAI) -> str:
+def _analyze_image(file_path: str, vision_llm) -> str:
     """Analyze images using vision model for structured data extraction."""
     try:
         with open(file_path, 'rb') as f:
@@ -347,13 +349,16 @@ def _analyze_image(file_path: str, vision_llm: ChatOpenAI) -> str:
             )
         ]
         
-        response = vision_llm.invoke(message)
-        return f"Image Analysis for: {os.path.basename(file_path)}\n\n{response.content}"
+        # Use resilient client's generate_completion method
+        response_text = vision_llm.generate_completion(
+            [{"role": "user", "content": message[0].content}]
+        )
+        return f"Image Analysis for: {os.path.basename(file_path)}\n\n{response_text}"
     
     except Exception as e:
         return f"Error analyzing image: {str(e)}"
 
-def _extract_text_from_image_base64(image_base64: str, vision_llm: ChatOpenAI) -> str:
+def _extract_text_from_image_base64(image_base64: str, vision_llm) -> str:
     """Extract text from image using vision model."""
     try:
         message = [
@@ -373,8 +378,11 @@ def _extract_text_from_image_base64(image_base64: str, vision_llm: ChatOpenAI) -
             )
         ]
         
-        response = vision_llm.invoke(message)
-        return response.content
+        # Use resilient client's generate_completion method
+        response_text = vision_llm.generate_completion(
+            [{"role": "user", "content": message[0].content}]
+        )
+        return response_text
     except Exception as e:
         return f"Error extracting text from image: {str(e)}"
 

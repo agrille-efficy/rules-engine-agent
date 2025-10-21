@@ -15,12 +15,28 @@ class DatabaseSchemaService:
     """
     
     def __init__(self):
-        # Import here to avoid circular dependency
-        from ..rag.pipeline import qdrant_client, embeddings
-        
-        self.client = qdrant_client
-        self.embeddings = embeddings
+        # Import here to avoid circular dependency - use lazy loading
+        self._client = None
+        self._embeddings = None
         self.collection_name = "maxo_vector_store_v2"
+    
+    @property
+    def client(self):
+        """Lazy load Qdrant client."""
+        if self._client is None:
+            from ..rag.pipeline import _get_cached_qdrant_client
+            qdrant_client = _get_cached_qdrant_client()
+            # Handle both ResilientQdrantClient and regular QdrantClient
+            self._client = qdrant_client.client if hasattr(qdrant_client, 'client') else qdrant_client
+        return self._client
+    
+    @property
+    def embeddings(self):
+        """Lazy load embeddings."""
+        if self._embeddings is None:
+            from ..rag.pipeline import _get_cached_embeddings
+            self._embeddings = _get_cached_embeddings()
+        return self._embeddings
         
     def get_table_fields(
         self,

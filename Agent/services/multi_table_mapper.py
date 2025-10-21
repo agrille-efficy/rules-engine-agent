@@ -527,9 +527,72 @@ class MultiTableFieldMapper:
                 if mapped_count > 0:
                     logging.info(f"Mapped {mapped_count} columns from '{semantic_group}' group to '{target_relation_table}'")
         
+        # EXPLICIT FK MAPPING: Handle foreign key columns (uniqueID patterns)
+        # Map compUniqueID, userUniqueID etc. to their relationship tables
+        fk_column_list = column_groups.get('foreign_keys', [])
+        for fk_col_name in fk_column_list:
+            if fk_col_name in assigned_columns:
+                continue
+            
+            fk_col_lower = fk_col_name.lower()
+            target_fk_table = None
+            
+            # Pattern matching for FK → Relationship table
+            if 'compuniqueid' in fk_col_lower or 'comp_uniqueid' in fk_col_lower:
+                # Find Oppo_Comp table
+                target_fk_table = next((t for t in relation_tables if 'comp' in t.lower() and primary_table and primary_table[:4].lower() in t.lower()), None)
+            elif 'useruniqueid' in fk_col_lower or 'user_uniqueid' in fk_col_lower:
+                # Find Oppo_User table
+                target_fk_table = next((t for t in relation_tables if 'user' in t.lower() and primary_table and primary_table[:4].lower() in t.lower()), None)
+            elif 'contuniqueid' in fk_col_lower or 'cont_uniqueid' in fk_col_lower or 'contactuniqueid' in fk_col_lower:
+                # Find Oppo_Cont table
+                target_fk_table = next((t for t in relation_tables if 'cont' in t.lower() and primary_table and primary_table[:4].lower() in t.lower()), None)
+            
+            if target_fk_table:
+                # Try to find existing mapping first
+                candidates = column_to_table_mappings.get(fk_col_name, [])
+                target_mapping = next(
+                    (c['mapping'] for c in candidates if c['table'] == target_fk_table),
+                    None
+                )
+                
+                # If no mapping found, create one with moderate confidence
+                if not target_mapping:
+                    from ..models.rag_match_model import FieldMapping
+                    schema = table_schemas.get(target_fk_table, {})
+                    target_fields = schema.get('fields', [])
+                    
+                    # Look for CompanyKey or similar field
+                    suitable_field = None
+                    for field in target_fields:
+                        field_lower = field.lower()
+                        if 'companykey' in field_lower and 'comp' in fk_col_lower:
+                            suitable_field = field
+                            break
+                        elif 'userkey' in field_lower and 'user' in fk_col_lower:
+                            suitable_field = field
+                            break
+                        elif 'contactkey' in field_lower and 'cont' in fk_col_lower:
+                            suitable_field = field
+                            break
+                    
+                    if suitable_field:
+                        target_mapping = FieldMapping(
+                            source_column=fk_col_name,
+                            source_column_english=fk_col_name,
+                            target_column=suitable_field,
+                            confidence_score=0.70,  # Good confidence for FK pattern match
+                            match_type='foreign_key_pattern'
+                        )
+                
+                if target_mapping:
+                    table_assignments[target_fk_table].append(target_mapping)
+                    assigned_columns.add(fk_col_name)
+                    table_usage[target_fk_table] += 1
+                    logging.info(f"  → FK '{fk_col_name}' → '{target_fk_table}' (pattern match)")
+        
         # Continue with explicit FK/relationship column mapping
         fk_columns = []
-        fk_columns.extend(column_groups.get('foreign_keys', []))
         fk_columns.extend(column_groups.get('relationship_data', []))
         
         relationship_mapped = 0

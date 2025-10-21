@@ -93,7 +93,7 @@ def field_mapping_node(state: WorkflowState) -> WorkflowState:
             file_analysis,
             candidate_tables,
             primary_table=selected_table,
-            max_tables=8  # Increased from 5 to fetch more relationship tables
+            max_tables=15  # Increased from 8 to 15 to include more relationship tables
         )
         
         # Log comprehensive results

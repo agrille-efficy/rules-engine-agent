@@ -445,12 +445,91 @@ class MultiTableFieldMapper:
         
         logging.info(f"Found {len(relation_tables)} relationship tables to check")
         
-        # Get all foreign key and relationship columns
+        # EXPLICIT MAPPING: Map semantic groups to their corresponding relationship tables
+        # This ensures user/company/contact references get properly mapped
+        semantic_to_relation_mapping = {
+            'user_references': ['_user', 'user_'],
+            'company_references': ['_comp', 'comp_'],
+            'contact_references': ['_cont', 'cont_']
+        }
+        
+        for semantic_group, table_patterns in semantic_to_relation_mapping.items():
+            group_columns = column_groups.get(semantic_group, [])
+            if not group_columns:
+                continue
+            
+            # Find the matching relationship table
+            target_relation_table = None
+            for rel_table in relation_tables:
+                rel_table_lower = rel_table.lower()
+                # Check if this relationship table matches the pattern and the primary entity
+                if any(pattern in rel_table_lower for pattern in table_patterns):
+                    if primary_table and primary_table[:4].lower() in rel_table_lower:
+                        target_relation_table = rel_table
+                        break
+            
+            if target_relation_table:
+                # Map all columns from this group to the target relationship table
+                mapped_count = 0
+                for col_name in group_columns:
+                    if col_name in assigned_columns:
+                        continue
+                    
+                    # Find or create mapping for this column to the target table
+                    candidates = column_to_table_mappings.get(col_name, [])
+                    target_mapping = next(
+                        (c['mapping'] for c in candidates if c['table'] == target_relation_table),
+                        None
+                    )
+                    
+                    # If no direct mapping exists (low confidence), create a relationship mapping
+                    # with moderate confidence since we know semantically it belongs here
+                    if not target_mapping:
+                        # Try to find a reasonable field in the target table
+                        from ..models.rag_match_model import FieldMapping
+                        schema = table_schemas.get(target_relation_table, {})
+                        target_fields = schema.get('fields', [])
+                        
+                        # Look for foreign key fields in the relationship table
+                        # E.g., in Oppo_User, look for oppouserUserKey
+                        suitable_field = None
+                        for field in target_fields:
+                            field_lower = field.lower()
+                            # Match user FK patterns
+                            if semantic_group == 'user_references' and ('userkey' in field_lower or 'user_key' in field_lower):
+                                suitable_field = field
+                                break
+                            # Match company FK patterns
+                            elif semantic_group == 'company_references' and ('companykey' in field_lower or 'company_key' in field_lower):
+                                suitable_field = field
+                                break
+                            # Match contact FK patterns
+                            elif semantic_group == 'contact_references' and ('contactkey' in field_lower or 'contact_key' in field_lower):
+                                suitable_field = field
+                                break
+                        
+                        if suitable_field:
+                            target_mapping = FieldMapping(
+                                source_column=col_name,
+                                source_column_english=col_name,  # Use same name for English
+                                target_column=suitable_field,
+                                confidence_score=0.65,  # Moderate confidence for semantic mapping
+                                match_type='semantic_group'
+                            )
+                    
+                    if target_mapping:
+                        table_assignments[target_relation_table].append(target_mapping)
+                        assigned_columns.add(col_name)
+                        table_usage[target_relation_table] += 1
+                        mapped_count += 1
+                        logging.info(f"  → Semantic '{col_name}' → '{target_relation_table}' (group: {semantic_group})")
+                
+                if mapped_count > 0:
+                    logging.info(f"Mapped {mapped_count} columns from '{semantic_group}' group to '{target_relation_table}'")
+        
+        # Continue with explicit FK/relationship column mapping
         fk_columns = []
         fk_columns.extend(column_groups.get('foreign_keys', []))
-        fk_columns.extend(column_groups.get('user_references', []))
-        fk_columns.extend(column_groups.get('company_references', []))
-        fk_columns.extend(column_groups.get('contact_references', []))
         fk_columns.extend(column_groups.get('relationship_data', []))
         
         relationship_mapped = 0

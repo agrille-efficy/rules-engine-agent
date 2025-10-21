@@ -151,9 +151,42 @@ class GenericFileIngestionRAGPipeline:
             
             logging.info(f"Stored {relations_stored} relations (threshold: {self.memory.confidence_threshold_relation})")
         
+        # Ensure critical relationship tables are included even if not in top 15
+        # This helps with common patterns like Company, User, Contact relationships
+        critical_patterns = ['_comp', '_user', '_cont']
+        critical_relations = []
+        
+        if ranked_relations and ranked_entities:
+            # Get the primary entity name (e.g., "Opportunity")
+            primary_entity = ranked_entities[0]['table_name'] if ranked_entities else None
+            
+            if primary_entity:
+                entity_prefix = primary_entity[:4].lower()  # e.g., "oppo"
+                
+                # Find critical relationship tables that match patterns
+                for relation in ranked_relations:
+                    table_name_lower = relation['table_name'].lower()
+                    
+                    # Check if this is a critical relationship table for the primary entity
+                    if (entity_prefix in table_name_lower and 
+                        any(pattern in table_name_lower for pattern in critical_patterns)):
+                        critical_relations.append(relation)
+                        logging.info(f"Identified critical relationship table: {relation['table_name']} (score: {relation['composite_score']:.3f})")
+        
         # Compile final results
         memory_summary = self.memory.get_summary()
         columns = [col.english_name or col.name for col in file_analysis.columns]
+        
+        # Build stage2_relation_results with critical tables guaranteed
+        stage2_results = ranked_relations[:15] if ranked_relations else []
+        
+        # Add critical tables if they're not already in top 15
+        if critical_relations:
+            stage2_table_names = {t['table_name'] for t in stage2_results}
+            for critical in critical_relations:
+                if critical['table_name'] not in stage2_table_names:
+                    stage2_results.append(critical)
+                    logging.info(f"Added critical table to results: {critical['table_name']}")
         
         final_results = {
             'pipeline_type': 'entity_first_two_stage',
@@ -173,9 +206,9 @@ class GenericFileIngestionRAGPipeline:
             'relations_discovered': memory_summary['relations_discovered'],
             'memory_summary': memory_summary,
             'ingestion_summary': self._create_entity_first_summary(memory_summary),
-            'stage1_entity_results': ranked_entities[:5] if ranked_entities else [],
-            'stage2_relation_results': ranked_relations[:5] if ranked_relations else [],
-            'top_10_tables': (ranked_entities + ranked_relations)[:10]
+            'stage1_entity_results': ranked_entities[:10] if ranked_entities else [],
+            'stage2_relation_results': stage2_results,  # Now includes critical tables
+            'top_25_tables': (ranked_entities + ranked_relations)[:25]
         }
         
         return final_results
@@ -252,8 +285,8 @@ class GenericFileIngestionRAGPipeline:
         logging.info(f"Review Required: {'Yes' if summary['requires_review'] else 'No'}")
         logging.info(f"Mapping Ready: {'Yes' if summary['mapping_ready'] else 'No'}")
         
-        logging.info("TOP 10 DATABASE TABLES:") 
-        for i, table in enumerate(results.get('top_10_tables', [])[:10], 1):  
+        logging.info("TOP 25 DATABASE TABLES:")  # Updated from TOP 10
+        for i, table in enumerate(results.get('top_25_tables', [])[:25], 1):  # Updated to top_25_tables
             logging.info(f"{i}. {table['table_name']} ({table['table_kind']})")
             logging.info(f"   Score: {table['composite_score']:.3f} | Fields: {table['field_count']} | Matches: {table['total_matches']}")
                 
@@ -291,7 +324,7 @@ class GenericFileIngestionRAGPipeline:
                     'field_count': table['field_count'],
                     'table_schema': table['content']
                 }
-                for table in results.get('top_10_tables', [])[:10]
+                for table in results.get('top_25_tables', [])[:25]  # Updated from top_10_tables
             ],
             'generation_timestamp': pd.Timestamp.now().isoformat()
         }

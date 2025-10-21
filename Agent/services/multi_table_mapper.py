@@ -160,23 +160,24 @@ class MultiTableFieldMapper:
             # Score relationship tables by their usefulness
             scored_relations = []
             for rel_table in relation_tables:
-                table_name = rel_table.get('table_name', '').lower()
+                table_name = rel_table.get('table_name', '')
+                table_name_lower = table_name.lower()  # Use lowercase for pattern matching
                 score = rel_table.get('composite_score', 0.0)
                 
                 # Boost score for commonly needed relationship patterns
                 boost = 0.0
-                if '_comp' in table_name:  # Company relationships
-                    boost = 0.3
-                elif '_user' in table_name:  # User relationships
-                    boost = 0.3
-                elif '_cont' in table_name:  # Contact relationships
-                    boost = 0.2
-                elif 'intr_' in table_name or '_intr' in table_name:  # Interest/intervention
-                    boost = 0.2
-                elif '_prod' in table_name:  # Product relationships
-                    boost = 0.15
-                elif '_proj' in table_name:  # Project relationships
-                    boost = 0.15
+                if '_comp' in table_name_lower:  # Company relationships
+                    boost = 0.5  # Increased from 0.3 to prioritize company tables
+                elif '_user' in table_name_lower:  # User relationships
+                    boost = 0.5  # Increased from 0.3 to prioritize user tables
+                elif '_cont' in table_name_lower:  # Contact relationships
+                    boost = 0.35  # Increased from 0.2
+                elif 'intr_' in table_name_lower or '_intr' in table_name_lower:  # Interest/intervention
+                    boost = 0.35  # Increased from 0.2
+                elif '_prod' in table_name_lower:  # Product relationships
+                    boost = 0.25  # Increased from 0.15
+                elif '_proj' in table_name_lower:  # Project relationships
+                    boost = 0.25  # Increased from 0.15
                 
                 adjusted_score = score + boost
                 scored_relations.append((adjusted_score, rel_table))

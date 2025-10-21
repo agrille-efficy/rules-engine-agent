@@ -46,6 +46,36 @@ def field_mapping_node(state: WorkflowState) -> WorkflowState:
                 'query_coverage': match.metadata.get('query_coverage', 0) if match.metadata else 0,
             })
         
+        # Ensure critical relationship tables are included if available
+        # These are commonly needed tables that might not be in top 10 but are essential
+        critical_relation_patterns = ['_comp', '_user', '_cont']
+        if selected_table:
+            # Build list of critical relationship tables for the selected entity
+            # E.g., if selected_table is "Opportunity", look for "Oppo_Comp", "Oppo_User", "Oppo_Cont"
+            selected_prefix = selected_table[:4].lower()  # e.g., "Opportunity" -> "oppo"
+            
+            existing_table_names = {t['table_name'].lower() for t in candidate_tables}
+            
+            # Check RAG results for critical tables that might have been filtered out
+            for match in rag_match_result.matched_tables:
+                table_lower = match.table_name.lower()
+                
+                # Check if this is a critical relationship table for the selected entity
+                if (selected_prefix in table_lower and 
+                    any(pattern in table_lower for pattern in critical_relation_patterns) and
+                    table_lower not in existing_table_names):
+                    
+                    # Add this critical table to candidates
+                    logging.info(f"Adding critical relationship table: {match.table_name} (score: {match.similarity_score:.3f})")
+                    candidate_tables.append({
+                        'table_name': match.table_name,
+                        'table_kind': match.metadata.get('table_kind', 'Relation') if match.metadata else 'Relation',
+                        'table_code': match.metadata.get('table_code', '') if match.metadata else '',
+                        'composite_score': match.similarity_score,
+                        'field_count': match.metadata.get('field_count', 0) if match.metadata else 0,
+                        'query_coverage': match.metadata.get('query_coverage', 0) if match.metadata else 0,
+                    })
+        
         # Prioritize selected table by moving it to the front of the candidate list
         if selected_table:
             logging.info(f"Prioritizing selected table: {selected_table}")
@@ -63,7 +93,7 @@ def field_mapping_node(state: WorkflowState) -> WorkflowState:
             file_analysis,
             candidate_tables,
             primary_table=selected_table,
-            max_tables=5  # Map to up to 5 tables
+            max_tables=8  # Increased from 5 to fetch more relationship tables
         )
         
         # Log comprehensive results

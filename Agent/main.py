@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from .core.workflow_engine import WorkflowEngine
+from .models.validators import PipelineInput, sanitize_for_logging
 
 
 def setup_logging(level: str = "INFO"):
@@ -26,26 +27,53 @@ def run_workflow(
     file_path: str,
     user_context: Optional[str] = None,
     table_preference: Optional[str] = None,
-    log_level: str = "INFO"
+    log_level: str = "INFO",
+    max_file_size_mb: int = 100
 ) -> dict:
     """
-    Run the complete workflow for a given file.
+    Run the complete workflow for a given file with input validation.
     
     Args:
         file_path: Path to the CSV file to process
-        user_context: Optional context about the data
+        user_context: Optional context about the data (will be sanitized)
         table_preference: Optional preferred table name
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
+        max_file_size_mb: Maximum file size in MB (default 100)
         
     Returns:
         Final workflow state as dictionary
+        
+    Raises:
+        ValueError: If inputs are invalid or contain malicious patterns
+        FileNotFoundError: If file doesn't exist
     """
     # Setup logging
     setup_logging(log_level)
     
-    # Validate file exists
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File not found: {file_path}")
+    # Get workspace root for validation
+    workspace_root = str(Path.cwd())
+    
+    # Validate all inputs using Pydantic
+    try:
+        validated_input = PipelineInput(
+            file_path=file_path,
+            user_context=user_context,
+            workspace_root=workspace_root,
+            max_file_size_mb=max_file_size_mb
+        )
+        
+        # Use validated inputs
+        safe_file_path = validated_input.file_path
+        safe_user_context = validated_input.user_context
+        
+        logging.info(f"✅ Input validation passed")
+        logging.info(f"   File: {sanitize_for_logging(safe_file_path, 80)}")
+        if safe_user_context:
+            logging.info(f"   Context: {sanitize_for_logging(safe_user_context, 80)}")
+        
+    except ValueError as e:
+        logging.error(f"❌ Input validation failed: {e}")
+        raise ValueError(f"Invalid input: {e}")
     
     # Initialize and run workflow engine
     engine = WorkflowEngine(use_checkpointer=True)
@@ -53,10 +81,10 @@ def run_workflow(
     # Visualize workflow structure
     engine.visualize_workflow()
     
-    # Execute workflow
+    # Execute workflow with validated inputs
     result = engine.run(
-        file_path=file_path,
-        user_context=user_context,
+        file_path=safe_file_path,
+        user_context=safe_user_context,
         table_preference=table_preference
     )
     
@@ -94,6 +122,12 @@ def main():
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level"
     )
+    parser.add_argument(
+        "--max-file-size",
+        type=int,
+        default=100,
+        help="Maximum file size in MB (default: 100)"
+    )
     
     args = parser.parse_args()
     
@@ -102,7 +136,8 @@ def main():
             file_path=args.file_path,
             user_context=args.context,
             table_preference=args.table,
-            log_level=args.log_level
+            log_level=args.log_level,
+            max_file_size_mb=args.max_file_size
         )
         
         # Display comprehensive results

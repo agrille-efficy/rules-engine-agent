@@ -6,10 +6,17 @@ import os
 import json
 import pandas as pd
 import logging
+from typing import Optional
 
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
 from ..config import get_settings
+from ..models.validators import (
+    PipelineInput, 
+    UserContextInput, 
+    validate_output_path,
+    sanitize_for_logging
+)
 from .memory import EntityRelationMemory
 from ..services.translator import UniversalTranslator
 from .domain_classifier import DomainClassifier
@@ -79,19 +86,33 @@ class GenericFileIngestionRAGPipeline:
                 raise ValueError(f"Collection '{self.collection_name}' does not exist. Please run the RAG system in 'feed' mode first to populate the vector store.")
             logging.info(f"Query-only mode: Using existing collection '{self.collection_name}'")
     
-    def run_entity_first_pipeline(self, file_analysis, user_context=None):
+    def run_entity_first_pipeline(self, file_analysis, user_context: Optional[str] = None):
         """
         Run the complete Entity-First two-stage pipeline.
         
         Args:
             file_analysis: FileAnalysisResult object with structured file data
-            user_context: Optional user context string
+            user_context: Optional user context string (will be sanitized)
             
         Returns:
             Dict with entity/relation search results
+            
+        Raises:
+            ValueError: If inputs contain malicious patterns
         """
+        # Sanitize user context to prevent prompt injection
+        safe_user_context = None
+        if user_context and user_context.strip():
+            try:
+                validated_context = UserContextInput(raw_context=user_context)
+                safe_user_context = validated_context.get_sanitized()
+                logging.info(f"User context validated and sanitized: {sanitize_for_logging(safe_user_context, 50)}")
+            except ValueError as e:
+                logging.error(f"User context validation failed: {e}")
+                raise ValueError(f"Invalid user context: {e}")
+        
         logging.info("=== ENTITY-FIRST RAG PIPELINE ===")
-        logging.info(f"Analyzing: {file_analysis.structure.file_name}")
+        logging.info(f"Analyzing: {sanitize_for_logging(file_analysis.structure.file_name)}")
         
         logging.info(f"{file_analysis.structure.file_type} file: {file_analysis.structure.total_columns} columns, {file_analysis.structure.total_rows} rows")
         
@@ -102,10 +123,10 @@ class GenericFileIngestionRAGPipeline:
             self.memory.set_relationship_data_flag(True)
             logging.info("Detected potential relationship/mapping data")
         
-        # Generate semantic search queries
+        # Generate semantic search queries (query_generator now handles validation internally)
         logging.info("Step 3: Generating semantic search queries...")
-        queries = self.query_generator.generate_queries(file_analysis, user_context)
-        logging.info(f"Generated {len(queries)} queries for database search")
+        queries = self.query_generator.generate_queries(file_analysis, safe_user_context)
+        logging.info(f"Generated {len(queries)} validated queries for database search")
         
         # STAGE 1: Entity-First Search
         logging.info("\n=== STAGE 1: ENTITY-FIRST SEARCH ===")
@@ -199,7 +220,7 @@ class GenericFileIngestionRAGPipeline:
                 'original_columns': [col.name for col in file_analysis.columns],
             },
             'inferred_domain': self.domain_classifier.infer_domain(columns),
-            'user_context': user_context,
+            'user_context': safe_user_context,  # Use sanitized context
             'search_queries_used': queries,
             'relationship_data_detected': memory_summary['relationship_data_detected'],
             'entities_discovered': memory_summary['entities_discovered'],
@@ -276,7 +297,7 @@ class GenericFileIngestionRAGPipeline:
         summary = results['ingestion_summary']
         
         logging.info("=" * 80)
-        logging.info(f"INGESTION ANALYSIS: {file_info['file_name']}")
+        logging.info(f"INGESTION ANALYSIS: {sanitize_for_logging(file_info['file_name'])}")
         logging.info("=" * 80)
         logging.info(f"File: {file_info['file_type']} | {file_info['total_rows']} rows | {file_info['total_columns']} columns")
         logging.info(f"Domain: {results['inferred_domain']['primary_domain']}")
@@ -303,7 +324,18 @@ class GenericFileIngestionRAGPipeline:
         if not output_file:
             file_name = results['file_analysis']['file_name']
             base_name = os.path.splitext(file_name)[0]
+            # Sanitize base_name to prevent path injection
+            base_name = base_name.replace('..', '').replace('/', '_').replace('\\', '_')
             output_file = rf"results_for_agent\{base_name}_ingestion_analysis.json"
+        
+        # Validate output path to prevent path traversal attacks
+        try:
+            safe_output_path = validate_output_path(output_file)
+            logging.info(f"Validated output path: {safe_output_path}")
+        except ValueError as e:
+            error_msg = f"Invalid output path: {e}"
+            logging.error(error_msg)
+            return {'error': error_msg}
         
         sql_agent_data = {
             'source_file': results['file_analysis']['file_name'],
@@ -324,16 +356,16 @@ class GenericFileIngestionRAGPipeline:
                     'field_count': table['field_count'],
                     'table_schema': table['content']
                 }
-                for table in results.get('top_25_tables', [])[:25]  # Updated from top_10_tables
+                for table in results.get('top_25_tables', [])[:25]
             ],
             'generation_timestamp': pd.Timestamp.now().isoformat()
         }
         
         try:
-            with open(output_file, 'w', encoding='utf-8') as f:
+            with open(safe_output_path, 'w', encoding='utf-8') as f:
                 json.dump(sql_agent_data, f, indent=2, ensure_ascii=False)
-            logging.info(f"SQL Agent data exported to: {output_file}")
-            return {'success': True, 'output_file': output_file}
+            logging.info(f"SQL Agent data exported to: {safe_output_path}")
+            return {'success': True, 'output_file': str(safe_output_path)}
         except Exception as e:
             return {'error': f'Export failed: {str(e)}'}
 

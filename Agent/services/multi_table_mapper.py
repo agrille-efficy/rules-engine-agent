@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from ..models.file_analysis_model import FileAnalysisResult, ColumnMetadata
 from ..models.rag_match_model import FieldMapping, FieldMappingResult, MappingValidationResult
 from .field_mapper import FieldMapperService
+from .llm_field_matcher import LLMFieldMatcherService
 from .database_schema import DatabaseSchemaService
 
 
@@ -19,7 +20,7 @@ class TableFieldMapping:
     table_type: str  # Entity or Relation
     mappings: List[FieldMapping]
     validation: MappingValidationResult
-    confidence_score: float
+    confidence: float
     insertion_order: int = 0  # Order for multi-table inserts (parent tables first)
 
 
@@ -43,13 +44,25 @@ class MultiTableFieldMapper:
     """
     
     def __init__(self):
-        self.single_mapper = FieldMapperService()
+        self.single_mapper = LLMFieldMatcherService()
         self.schema_service = DatabaseSchemaService()
         
         # Thresholds for multi-table mapping
         self.min_confidence_threshold = 0.5  # Lowered from 0.6 to capture more candidates
         self.min_columns_per_table = 1  # Minimum columns to consider a table relevant
         self.semantic_similarity_threshold = 0.75  # For column grouping
+        
+        # Refinement settings (to catch overloaded fields)
+        self.max_same_field_mappings = 2  # Maximum columns allowed per field
+        self.refinement_confidence_threshold = 0.72  # Remove mappings below this if field is overloaded
+        
+        # Generic field terms that indicate catch-all fields
+        self.generic_field_terms = [
+            'metadata', 'memo', 'data', 'info', 'information',
+            'ai', 'scoring', 'generic', 'misc', 'miscellaneous',
+            'other', 'extra', 'additional', 'temp', 'temporary',
+            'custom', 'field', 'column', 'value', 'blob', 'archived'
+        ]
         
     def map_to_multiple_tables(
         self,
@@ -311,50 +324,53 @@ class MultiTableFieldMapper:
             logging.info(f"  {group_name}: {len(columns)} columns")
         
         return filtered_groups
-    
+
     def _map_columns_to_all_tables(
-        self,
-        file_analysis: FileAnalysisResult,
-        table_schemas: Dict
-    ) -> Dict[str, List[Dict]]:
-        """
-        Map each column to ALL possible tables with confidence scores.
-        
-        Returns:
-            Dict mapping column_name -> [{table, field, confidence, mapping}, ...]
-        """
-        column_mappings = {}
-        
+            self,
+            file_analysis: FileAnalysisResult,
+            table_schemas: Dict
+        ) -> Dict[str, List[Dict]]:
+
+        columns_mappings = {}
+        unmapped_columns = []
+        english_names = {}
+
+        # Collect all columns
         for column in file_analysis.columns:
             col_name = column.name
-            column_mappings[col_name] = []
-            
-            # Try mapping to each table
-            for table_name, schema_info in table_schemas.items():
-                target_fields = schema_info['fields']
-                
-                # Find best match in this table
-                best_match = self.single_mapper._find_best_match(
-                    column,
-                    target_fields,
-                    file_analysis
+            columns_mappings[col_name] = []
+            unmapped_columns.append(col_name)
+            english_names[col_name] = column.english_name or col_name
+
+        all_target_fields = []
+        table_contexts = {}
+        for table_name, schema_info in table_schemas.items():
+            all_target_fields.extend(schema_info['fields'])
+            table_contexts[table_name] = f"Table: {table_name}"
+
+        batch_results = self.single_mapper.batch_match_fields(
+            source_columns=unmapped_columns,
+            target_fields=table_schemas,
+            english_names=english_names,
+            table_context="\n".join(table_contexts.values())
+        )
+
+        for col_name, result in batch_results.items():
+            if result:
+                columns_mappings[col_name].append({
+                    'table': result.get('table', 'unknown table (_map_columns_to_all_tables)'),
+                    'table_type': result.get('table_type', 'unknown table type'),
+                    'mapping': result.get('target_field'),
+                    'confidence': result.get('confidence', 0.0),
+                    'reasoning': result.get('reasoning', ''),
+                })
+
+                columns_mappings[col_name].sort(
+                    key=lambda x: x['confidence'],
+                    reverse=True
                 )
-                
-                if best_match and best_match.confidence_score >= self.min_confidence_threshold:
-                    column_mappings[col_name].append({
-                        'table': table_name,
-                        'table_type': schema_info['table_type'],
-                        'mapping': best_match,
-                        'rag_score': schema_info['rag_score']
-                    })
-            
-            # Sort by confidence (highest first)
-            column_mappings[col_name].sort(
-                key=lambda x: x['mapping'].confidence_score,
-                reverse=True
-            )
-        
-        return column_mappings
+
+        return columns_mappings 
     
     def _smart_multi_table_assignment(
         self,
@@ -612,7 +628,7 @@ class MultiTableFieldMapper:
             for candidate in candidates:
                 table = candidate['table']
                 mapping = candidate['mapping']
-                confidence = mapping.confidence_score
+                confidence = candidate['confidence']
                 
                 # Check if this is a relationship table
                 if table in relation_tables:
@@ -729,7 +745,7 @@ class MultiTableFieldMapper:
             
             # Assign to best matching table (with lower threshold for leftovers)
             for candidate in candidates:
-                if candidate['mapping'].confidence_score >= 0.3:
+                if candidate['mapping'].confidence >= 0.3:
                     table = candidate['table']
                     table_assignments[table].append(candidate['mapping'])
                     assigned_columns.add(col_name)
@@ -811,11 +827,12 @@ class MultiTableFieldMapper:
                 
                 for candidate in candidates:
                     table = candidate['table']
-                    confidence = candidate['mapping'].confidence_score
-                    rag_score = candidate['rag_score']
+                    confidence = candidate['confidence']
+                    # rag_score = candidate['rag_score']
                     
                     # Combined score: confidence + RAG relevance
-                    score = (confidence * 0.7) + (rag_score * 0.3)
+                    # score = (confidence * 0.7) + (rag_score * 0.3)
+                    score = confidence  # Simplified to just confidence for now
                     
                     if table not in table_scores:
                         table_scores[table] = []
@@ -851,6 +868,7 @@ class MultiTableFieldMapper:
     ) -> List[TableFieldMapping]:
         """
         Filter tables that have too few mappings and validate each table's mappings.
+        NOW WITH REFINEMENT: Detects and removes overloaded field mappings.
         """
         # Create lookup for table metadata
         table_metadata_lookup = {
@@ -864,6 +882,14 @@ class MultiTableFieldMapper:
                 logging.debug(f"Skipping {table_name}: only {len(mappings)} columns mapped")
                 continue
             
+            # *** NEW: Apply refinement before validation ***
+            mappings = self._refine_table_mappings(table_name, mappings)
+            
+            # Skip table if refinement removed too many mappings
+            if len(mappings) < self.min_columns_per_table:
+                logging.info(f"Skipping {table_name}: refinement reduced mappings below threshold")
+                continue
+            
             # Get table schema info
             schema = self.schema_service.get_table_fields(table_name)
             
@@ -875,7 +901,7 @@ class MultiTableFieldMapper:
             )
             
             # Calculate table confidence
-            avg_confidence = sum(m.confidence_score for m in mappings) / len(mappings) if mappings else 0.0
+            avg_confidence = sum(m.confidence for m in mappings) / len(mappings) if mappings else 0.0
             
             # Get table type from metadata (not from name pattern)
             table_meta = table_metadata_lookup.get(table_name, {})
@@ -936,7 +962,7 @@ class MultiTableFieldMapper:
         unmapped = list(all_columns - mapped_columns)
         
         # Determine overall confidence
-        avg_confidence = sum(tm.confidence_score for tm in valid_table_mappings) / len(valid_table_mappings) if valid_table_mappings else 0.0
+        avg_confidence = sum(tm.confidence for tm in valid_table_mappings) / len(valid_table_mappings) if valid_table_mappings else 0.0
         overall_confidence = self._calculate_confidence_level(avg_confidence)
         
         is_valid = overall_coverage >= 50.0 and avg_confidence >= 0.6
@@ -984,3 +1010,85 @@ class MultiTableFieldMapper:
             return "medium"
         else:
             return "low"
+    
+    def _refine_table_mappings(
+        self,
+        table_name: str,
+        mappings: List[FieldMapping]
+    ) -> List[FieldMapping]:
+        """
+        Refine mappings for a single table by detecting overloaded fields.
+        Removes low-confidence mappings when too many columns map to the same field.
+        """
+        logging.info(f"🔍 Refining mappings for table: {table_name} ({len(mappings)} mappings)")
+        
+        # Count mappings per target field
+        target_field_analysis = {}
+        for mapping in mappings:
+            if mapping.target_column not in target_field_analysis:
+                target_field_analysis[mapping.target_column] = []
+            target_field_analysis[mapping.target_column].append(mapping)
+        
+        # Detect overloaded fields
+        overloaded_fields = {}
+        
+        for field, field_mappings in target_field_analysis.items():
+            count = len(field_mappings)
+            
+            if count <= self.max_same_field_mappings:
+                continue
+            
+            is_generic = self._is_generic_field(field)
+            
+            # Check if all mappings have identical confidence scores
+            confidence_scores = [m.confidence for m in field_mappings]
+            has_identical_scores = len(set(confidence_scores)) == 1
+            
+            if is_generic:
+                overloaded_fields[field] = {
+                    'count': count,
+                    'reason': 'generic_field',
+                    'mappings': field_mappings
+                }
+                logging.warning(f"⚠️  Detected {count} mappings to GENERIC field '{field}'")
+            elif has_identical_scores and count > self.max_same_field_mappings:
+                overloaded_fields[field] = {
+                    'count': count,
+                    'reason': 'identical_scores',
+                    'mappings': field_mappings
+                }
+                logging.warning(f"⚠️  Detected {count} mappings to '{field}' with IDENTICAL confidence ({confidence_scores[0]:.2f}) - likely algorithmic issue")
+        
+        if not overloaded_fields:
+            logging.info("✅ No overloaded fields detected - refinement not needed")
+            return mappings
+        
+        # Remove low-confidence mappings to overloaded fields
+        refined_mappings = []
+        removed_count = 0
+        
+        for mapping in mappings:
+            if mapping.target_column in overloaded_fields:
+                reason = overloaded_fields[mapping.target_column]['reason']
+                
+                if mapping.confidence < self.refinement_confidence_threshold:
+                    logging.info(f"❌ Removed: {mapping.source_column} → {mapping.target_column} "
+                               f"(score: {mapping.confidence:.2f}, reason: {reason})")
+                    removed_count += 1
+                else:
+                    logging.info(f"✅ Kept high-confidence: {mapping.source_column} → {mapping.target_column} "
+                               f"(score: {mapping.confidence:.2f})")
+                    refined_mappings.append(mapping)
+            else:
+                refined_mappings.append(mapping)
+        
+        if removed_count > 0:
+            logging.warning(f"🔧 Refinement: Removed {removed_count} suspicious mappings from {table_name}")
+            logging.info(f"📉 Mappings reduced from {len(mappings)} to {len(refined_mappings)}")
+        
+        return refined_mappings
+    
+    def _is_generic_field(self, field_name: str) -> bool:
+        """Check if a field name contains generic/catch-all terms."""
+        field_lower = field_name.lower()
+        return any(term in field_lower for term in self.generic_field_terms)

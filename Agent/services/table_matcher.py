@@ -75,6 +75,7 @@ class TableMatcherService:
                     'table_kind': entity['table_kind'],
                     'field_count': entity['field_count'],
                     'query_coverage': entity['query_coverage'],
+                    'table_fields' : entity.get('fields', []),
                 }
             ))
 
@@ -93,12 +94,13 @@ class TableMatcherService:
                     'table_kind': relation['table_kind'],
                     'field_count': relation['field_count'],
                     'query_coverage': relation['query_coverage'],
+                    'table_fields': relation.get('metadata', {}).get('fields', []),
                 }  
             ))
 
         search_query = f"Analyzed {file_analysis.structure.file_name}: "
         search_query += f"{file_analysis.structure.total_columns} columns, "
-        search_query += f"domain: {rag_results.get('inferred_domain', {}).get('primary_domain', 'unknown')}"
+        search_query += f"domain: {rag_results.get('inferred_domain', {}).get('primary_domain', 'unknown domain')}"
 
         return TableMatchResult(
             matched_tables=matched_tables,

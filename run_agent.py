@@ -45,6 +45,12 @@ if rag_result:
     for i, match in enumerate(rag_result.matched_tables[:5], 1):
         print(f"   {i}. {match.table_name:30s} (score: {match.similarity_score:.3f}, confidence: {match.confidence})")
 
+# Display field mapping refinement info (if available in logs)
+print(f"\n💡 TIP: Check the logs above for refinement details:")
+print(f"   Look for: '🔍 Starting refinement analysis'")
+print(f"   Look for: '⚠️  Detected X mappings to...'")
+print(f"   Look for: '🔧 Refinement: Removed X suspicious mappings'")
+
 if result.get('field_mapping_result'):
     mapping = result['field_mapping_result']
     
@@ -154,16 +160,16 @@ else:
     print("✅ Workflow completed successfully")
     print("=" * 100)
 
-# Next steps
-print("\n" + "=" * 100)
-print("🎯 NEXT STEPS")
-print("=" * 100)
-print("\n1. Review the mappings above")
-print("2. Identify which unmapped columns should go to other tables")
-print("3. Tune thresholds in multi_table_mapper.py:")
-print("   - min_confidence_threshold (currently 0.5)")
-print("   - min_columns_per_table (currently 1)")
-print("   - semantic_similarity_threshold (currently 0.75)")
-print("4. Re-run to see if more tables are used")
+# # Next steps
+# print("\n" + "=" * 100)
+# print("🎯 NEXT STEPS")
+# print("=" * 100)
+# print("\n1. Review the mappings above")
+# print("2. Identify which unmapped columns should go to other tables")
+# print("3. Tune thresholds in multi_table_mapper.py:")
+# print("   - min_confidence_threshold (currently 0.5)")
+# print("   - min_columns_per_table (currently 1)")
+# print("   - semantic_similarity_threshold (currently 0.75)")
+# print("4. Re-run to see if more tables are used")
 
-print("\n" + "=" * 100)
+# print("\n" + "=" * 100)

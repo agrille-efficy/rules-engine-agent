@@ -127,7 +127,7 @@ class FileAnalysisResult:
         structure_data = data.get("structure", {})
         structure = FileStructureInfo(
             file_name=structure_data.get("file_name", ""),
-            file_type=structure_data.get("file_type", "unknown"),
+            file_type=structure_data.get("file_type", "unknown file_type"),
             file_path=structure_data.get("file_path", ""),
             file_size_bytes=structure_data.get("file_size_bytes"),
             total_rows=structure_data.get("total_rows"),
@@ -138,7 +138,7 @@ class FileAnalysisResult:
         columns = [
             ColumnMetadata(
                 name=col.get("name", ""),
-                data_type=col.get("data_type", "unknown"),
+                data_type=col.get("data_type", "unknown data type"),
                 null_count=col.get("null_count", 0),
                 unique_count=col.get("unique_count", 0),
                 max_length=col.get("max_length"),

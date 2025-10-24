@@ -77,7 +77,7 @@ class FileAnalyzerService:
                 name=col_name,                           # Original name
                 english_name=english_name,               # Translated name
                 translation_used=(col_name != english_name),  # Translation flag
-                data_type=col_data.get("data_type", "Unknown"),
+                data_type=col_data.get("data_type", "Unknown data type"),
                 max_length=col_data.get("max_length"),
                 null_count=col_data.get("null_count", 0),
                 unique_count=col_data.get("unique_count", 0),

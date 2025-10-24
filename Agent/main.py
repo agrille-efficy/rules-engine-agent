@@ -79,7 +79,7 @@ def run_workflow(
     engine = WorkflowEngine(use_checkpointer=True)
     
     # Visualize workflow structure
-    engine.visualize_workflow()
+    # engine.visualize_workflow()
     
     # Execute workflow with validated inputs
     result = engine.run(
@@ -163,8 +163,52 @@ def main():
             for i, match in enumerate(rag_result.matched_tables[:5], 1):
                 print(f"   {i}. {match.table_name:30s} (score: {match.similarity_score:.3f}, confidence: {match.confidence})")
 
+        opportunity_match = next((m for m in rag_result.matched_tables if m.table_name == "Opportunity"), None)
+        if opportunity_match:
+            print("\n" + "=" * 100)
+            print("📋 OPPORTUNITY TABLE METADATA")
+            print("=" * 100)
+            print(opportunity_match)
+            
+        # print(f"\nResult:\n\n {result} \n")
         if result.get('field_mapping_result'):
+
             mapping = result['field_mapping_result']
+
+            print("\n" + "=" * 100)
+            print("🎯 FIELD MAPPINGS")
+            print("=" * 100)
+            print("Import file fields                        → Target database fields                  Confidence      Type")
+            print("-" * 100)
+            for m in mapping.mappings:
+                # Safely coerce confidence to float and handle None or string values
+                raw_conf = getattr(m, 'confidence_score', 0.0)
+                try:
+                    conf = float(raw_conf) if raw_conf is not None else 0.0
+                except Exception:
+                    try:
+                        s = str(raw_conf).strip()
+                        if s.endswith('%'):
+                            conf = float(s.strip('%')) / 100.0
+                        else:
+                            conf = float(s)
+                    except Exception:
+                        conf = 0.0
+                # Clamp between 0 and 1
+                conf = max(0.0, min(1.0, conf))
+                confidence_bat = "█" * int(conf * 10)
+                conf_display = f"{conf:.2f}"
+                print(f"{m.source_column:<40} → {m.target_column or 'None':<40} {conf_display:>6} {confidence_bat:<10} {m.match_type}")
+            
+            #Unmapped columns
+            # unmapped = [m for m in mapping.mappings if m.match_type == 'UNMAPPED']
+            # if unmapped:
+            #     print("\n" + "=" * 100)
+            #     print("❌ UNMAPPED COLUMNS")
+            #     print("=" * 100)
+            #     for m in unmapped:
+            #         print(f"{m.source_column}")
+            # print(f"\nMAPPING RESULT:\n\n {mapping} \n")
             
             if hasattr(mapping, 'table_mappings'):
                 # Multi-table result

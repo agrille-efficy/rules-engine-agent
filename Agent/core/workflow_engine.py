@@ -155,8 +155,8 @@ class WorkflowEngine:
         logging.info("WORKFLOW EXECUTION SUMMARY")
         logging.info("=" * 80)
         
-        status = final_state.get("workflow_status", "unknown")
-        final_step = final_state.get("workflow_step", "unknown")
+        status = final_state.get("workflow_status", "unknown workflow status")
+        final_step = final_state.get("workflow_step", "unknown step")
         steps_completed = final_state.get("steps_completed", [])
         errors = final_state.get("errors", [])
         
@@ -183,7 +183,7 @@ class WorkflowEngine:
         if final_state.get("selected_table"):
             table = final_state["selected_table"]
             metadata = final_state.get("selected_table_metadata", {})
-            confidence = metadata.get("confidence", "unknown")
+            confidence = metadata.get("confidence", "unknown confidence")
             logging.info(f"✓ Selected table: {table} ({confidence} confidence)")
         
         if final_state.get("field_mapping_result"):
@@ -198,8 +198,8 @@ class WorkflowEngine:
             else:
                 # Single-table mapping result
                 validation = result.validation
-                logging.info(f"✓ Field mapping: {validation.mapped_count}/{validation.total_mappings} columns "
-                            f"({validation.mapping_coverage_percent:.1f}%, {validation.confidence_level} confidence)")
+                # logging.info(f"✓ Field mapping: {validation.mapped_count}/{validation.total_mappings} columns "
+                #             f"({validation.mapping_coverage_percent:.1f}%, {validation.confidence_level} confidence)")
         
         logging.info("=" * 80)
     

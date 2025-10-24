@@ -75,7 +75,7 @@ def test_multi_table_mapping():
     
     print(f"   Top 10 Candidates:")
     for i, table in enumerate(candidate_tables[:10], 1):
-        print(f"   {i}. {table['table_name']} ({table.get('table_kind', 'Unknown')}) - Score: {table['composite_score']:.3f}")
+        print(f"   {i}. {table['table_name']} ({table.get('table_kind', 'Unknown table kind')}) - Score: {table['composite_score']:.3f}")
     
     # Step 3: Multi-Table Mapping with DIAGNOSTICS
     print("\nSTEP 3: Multi-Table Mapping (DIAGNOSTIC MODE)")

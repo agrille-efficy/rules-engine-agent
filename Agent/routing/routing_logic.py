@@ -112,7 +112,7 @@ def route_after_field_mapping(
         requires_review = validation.requires_review
         coverage = validation.mapping_coverage_percent
         
-        logging.info(f"Single-table mapping: {coverage:.1f}% coverage")
+        # logging.info(f"Single-table mapping: {coverage:.1f}% coverage")
     
     # Check if requires review
     if requires_review or not is_valid:

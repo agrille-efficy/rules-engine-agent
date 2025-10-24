@@ -59,12 +59,17 @@ class TableIngestionChunkBuilder:
             except KeyError:
                 continue
             content = self._build_table_chunk(table, tbl_fields)
+            field_list = [
+                {"name": str(f.get('sfldName')), "type": str(f.get('sfldType'))}
+                for _, f in tbl_fields.iterrows()
+            ]
             metadata = {
                 "chunk_type": "table_ingestion_profile",
                 "primary_table": table.get('stblName'),
                 "table_code": table.get('stblCode'),
                 "table_kind": ('Relation' if table.get('stblKind') == 'R' else 'Entity'),
                 "field_count": len(tbl_fields),
+                "fields": field_list,
             }
             docs.append(Document(page_content=content, metadata=metadata))
         return docs
@@ -374,9 +379,13 @@ class TableIngestionChunkBuilder:
         chunks = []
         table_name = table.get('stblName')
         table_code = table.get('stblCode')
-        
+        field_names = [str(f.get('sfldName')) for _, f in tbl_fields.iterrows()]
         # 1. High-level table summary chunk
         summary_chunk = self._build_table_summary_chunk(table, tbl_fields)
+        field_list = [
+            {"name": str(f.get('sfldName')), "type": str(f.get('sfldType'))}
+            for _, f in tbl_fields.iterrows()
+        ]
         chunks.append(Document(
             page_content=summary_chunk,
             metadata={
@@ -385,22 +394,24 @@ class TableIngestionChunkBuilder:
                 "table_code": table_code,
                 "table_kind": ('Relation' if table.get('stblKind') == 'R' else 'Entity'),
                 "field_count": len(tbl_fields),
-                "semantic_focus": "table_purpose_domain"
+                "semantic_focus": "table_purpose_domain",
+                "fields": field_list,
             }
         ))
-        
         # 2. Field-focused chunks
         field_chunks = self._build_field_semantic_chunks(table, tbl_fields)
         chunks.extend(field_chunks)
-        
         # 3. Relationship-focused chunk
         if self._has_relationships(table, tbl_fields):
             rel_chunk = self._build_relationship_chunk(table, tbl_fields)
             if rel_chunk:
                 chunks.append(rel_chunk)
-        
         # 4. Keep original comprehensive chunk for complete context
         original_chunk = self._build_table_chunk(table, tbl_fields)
+        field_list = [
+            {"name": str(f.get('sfldName')), "type": str(f.get('sfldType'))}
+            for _, f in tbl_fields.iterrows()
+        ]
         chunks.append(Document(
             page_content=original_chunk,
             metadata={
@@ -409,10 +420,10 @@ class TableIngestionChunkBuilder:
                 "table_code": table_code,
                 "table_kind": ('Relation' if table.get('stblKind') == 'R' else 'Entity'),
                 "field_count": len(tbl_fields),
-                "semantic_focus": "complete_schema"
+                "semantic_focus": "complete_schema",
+                "fields": field_list,
             }
         ))
-        
         return chunks
 
     def _build_table_summary_chunk(self, table: Dict[str, Any], tbl_fields: pd.DataFrame) -> str:
@@ -484,7 +495,10 @@ class TableIngestionChunkBuilder:
                 continue
                 
             chunk_content = self._build_field_group_content(table_name, group_name, fields, table)
-            
+            group_field_list = [
+                {"name": str(f.get('sfldName')), "type": str(f.get('sfldType'))}
+                for f in fields
+            ]
             chunks.append(Document(
                 page_content=chunk_content,
                 metadata={
@@ -493,7 +507,8 @@ class TableIngestionChunkBuilder:
                     "table_code": table_code,
                     "field_group": group_name,
                     "field_count": len(fields),
-                    "semantic_focus": f"fields_{group_name}"
+                    "semantic_focus": f"fields_{group_name}",
+                    "fields": group_field_list,
                 }
             ))
         
@@ -622,10 +637,12 @@ class TableIngestionChunkBuilder:
         """Build a relationship-focused chunk for tables with significant relationships"""
         table_name = table.get('stblName')
         table_code = table.get('stblCode')
-        
         _, _, foreign_keys, _ = self._classify_fields(tbl_fields)
         related_tables = self.relationship_graph.get(table_name, [])
-        
+        field_list = [
+            {"name": str(f.get('sfldName')), "type": str(f.get('sfldType'))}
+            for _, f in tbl_fields.iterrows()
+        ]
         parts = []
         parts.append(f"=== {table_name} - RELATIONSHIPS & DEPENDENCIES ===")
         parts.append(f"Table: {table_name} ({table_code})")
@@ -675,7 +692,8 @@ class TableIngestionChunkBuilder:
                 "table_code": table_code,
                 "related_tables": related_tables,
                 "foreign_key_count": len(foreign_keys),
-                "semantic_focus": "relationships_dependencies"
+                "semantic_focus": "relationships_dependencies",
+                "fields": field_list,
             }
         )
 

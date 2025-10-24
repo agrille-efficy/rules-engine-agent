@@ -6,6 +6,7 @@ import os
 import json
 import pandas as pd
 import logging
+import time
 from typing import Optional
 
 from ..config import get_settings
@@ -196,10 +197,24 @@ class GenericFileIngestionRAGPipeline:
         # STAGE 1: Entity-First Search
         logging.info("\n=== STAGE 1: ENTITY-FIRST SEARCH ===")
         entity_results = self.vector_search.search_entity_tables_only(queries)
+
+        # first_key = next(iter(entity_results))
+        # first_value = entity_results[first_key]["fields"]
+        # logging.info(f"Entity search first result: {str(first_value)[:5000]}")
+
         logging.info(f"Found {len(entity_results)} entity tables")
-        
+
+        # first_key = next(iter(entity_results))
+        # first_value = entity_results[first_key].get("metadata", {}).get("fields", [])
+        # print(f"Entity search first result: {first_value}")
+        # time.sleep(50)
+
         ranked_entities = self.vector_search.rank_tables_by_relevance(entity_results)
-        
+        # first_element = ranked_entities[0]
+
+        # print(f"Ranked_entities metadata {first_element.get('fields')}")
+        # time.sleep(50)
+
         entities_stored = 0
         for entity in ranked_entities:
             if entity['composite_score'] >= self.memory.confidence_threshold_entity:
@@ -226,7 +241,6 @@ class GenericFileIngestionRAGPipeline:
         ranked_relations = []
         if relation_results:
             ranked_relations = self.vector_search.rank_tables_by_relevance(relation_results)
-            
             relations_stored = 0
             for relation in ranked_relations:
                 if relation['composite_score'] >= self.memory.confidence_threshold_relation:
@@ -296,7 +310,10 @@ class GenericFileIngestionRAGPipeline:
             'stage2_relation_results': stage2_results,  # Now includes critical tables
             'top_25_tables': (ranked_entities + ranked_relations)[:25]
         }
-        
+
+        # logging.info("stage1_entity_results sample: ")
+        # logging.info(json.dumps(final_results['stage1_entity_results'][:1], indent=4))
+        # time.sleep(500)
         return final_results
     
     def _find_related_entities(self, relation_table_name):

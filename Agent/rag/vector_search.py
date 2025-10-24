@@ -114,6 +114,7 @@ class VectorSearchService:
                             'field_count': point.payload['field_count'],
                             'content': point.payload['content'],
                             'metadata': point.payload['metadata'],
+                            # 'fields': point.payload['metadata'].get('fields', []),
                             'score': point.score,
                             'queries_matched': [i+1]
                         }
@@ -257,6 +258,17 @@ class VectorSearchService:
         ranked_tables = []
         
         for table_name, data in search_results.items():
+            # Extract fields from known locations to preserve them through ranking
+            fields = data.get('fields') or data.get('metadata', {}).get('fields')
+            if not fields and 'best_chunks' in data:
+                # Try to extract from multi-level best_chunks metadata
+                try:
+                    fields = data['best_chunks'].get('table_ingestion_profile', {}).get('metadata', {}).get('fields')
+                except Exception:
+                    fields = None
+            if not fields:
+                fields = []
+
             # Handle both search methods' return formats
             if 'scores' in data:
                 # Multi-level search format
@@ -290,8 +302,10 @@ class VectorSearchService:
                 'query_coverage': query_coverage,
                 'composite_score': composite_score,
                 'total_matches': total_matches,
-                'queries_matched': data['queries_matched']
+                'queries_matched': data['queries_matched'],
+                'fields': fields
             })
         
         ranked_tables.sort(key=lambda x: x['composite_score'], reverse=True)
+        
         return ranked_tables

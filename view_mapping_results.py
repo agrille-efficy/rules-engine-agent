@@ -66,7 +66,7 @@ if mapping_result and hasattr(mapping_result, 'table_mappings'):
         print(f"{'=' * 100}")
         print(f"Insertion Order: {table_mapping.insertion_order}")
         print(f"Columns Mapped: {len(table_mapping.mappings)}")
-        print(f"Confidence Score: {table_mapping.confidence_score:.2f}")
+        print(f"Confidence Score: {table_mapping.confidence:.2f}")
         print(f"Coverage: {table_mapping.validation.mapping_coverage_percent:.1f}%")
         print(f"Confidence Level: {table_mapping.validation.confidence_level}")
         

@@ -146,3 +146,27 @@ class TableMatchResult:
             "search_timestamp": self.search_timestamp,
             "search_query": self.search_query
         }
+
+@dataclass
+class TableFieldMapping:
+    """Field mappings for a specific table in multi-table mapping."""
+    table_name: str
+    table_type: str  # Entity or Relation
+    mappings: List[FieldMapping]
+    validation: MappingValidationResult
+    confidence: float
+    insertion_order: int = 0
+
+
+@dataclass
+class MultiTableMappingResult:
+    """Result of multi-table field mapping."""
+    source_file: str
+    total_source_columns: int
+    table_mappings: List[TableFieldMapping]
+    overall_coverage: float
+    overall_confidence: str
+    unmapped_columns: List[str]
+    is_valid: bool
+    requires_review: bool
+    requires_refinement: bool = False

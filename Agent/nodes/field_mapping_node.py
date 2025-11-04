@@ -52,19 +52,24 @@ def field_mapping_node(state: WorkflowState) -> WorkflowState:
         mapping_result = mapper.map_to_multiple_tables(
             file_analysis=file_analysis,
             candidate_tables=candidate_tables,
+            primary_table=selected_table,
             max_tables=15
         )
+        
         # Log results
-        mapped_count = len([m for m in mapping_result.mappings if m.match_type != 'UNMAPPED'])
-        tables_mapped = set([m.target_column for m in mapping_result.mappings if m.target_column])
-        logging.info(f"Mapping complete: {mapped_count}/{file_analysis.structure.total_columns} columns mapped")
+        total_mapped = sum(len(tm.mappings) for tm in mapping_result.table_mappings)
+        tables_mapped = [tm.table_name for tm in mapping_result.table_mappings]
+        
+        logging.info(f"Mapping complete: {total_mapped}/{file_analysis.structure.total_columns} columns mapped")
         logging.info(f"Tables used: {', '.join(tables_mapped)}")
-        unmapped_columns = [m.source_column for m in mapping_result.mappings if m.match_type == 'UNMAPPED']
-        if unmapped_columns:
-            logging.warning(f"Unmapped columns: {len(unmapped_columns)}")
-            logging.warning(f"    {', '.join(unmapped_columns[:5])}")
+        
+        if mapping_result.unmapped_columns:
+            logging.warning(f"Unmapped columns: {len(mapping_result.unmapped_columns)}")
+            logging.warning(f"    {', '.join(mapping_result.unmapped_columns[:5])}")
+        
         next_step = "validation"
         workflow_status = "in_progress"
+        
         # Create summary message
         return {
             **state,
@@ -75,7 +80,7 @@ def field_mapping_node(state: WorkflowState) -> WorkflowState:
             "steps_completed": state.get("steps_completed", []) + ["field_mapping"],
             "messages": state.get("messages", []) + [
                 HumanMessage(
-                    content=f"Mapped {mapped_count} fields across {len(tables_mapped)} tables: {', '.join(tables_mapped)}"
+                    content=f"Mapped {total_mapped} fields across {len(tables_mapped)} tables: {', '.join(tables_mapped)}"
                 )
             ]
         }

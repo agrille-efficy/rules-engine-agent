@@ -66,13 +66,13 @@ def run_workflow(
         safe_file_path = validated_input.file_path
         safe_user_context = validated_input.user_context
         
-        logging.info(f"✅ Input validation passed")
+        logging.info(f"Input validation passed")
         logging.info(f"   File: {sanitize_for_logging(safe_file_path, 80)}")
         if safe_user_context:
             logging.info(f"   Context: {sanitize_for_logging(safe_user_context, 80)}")
         
     except ValueError as e:
-        logging.error(f"❌ Input validation failed: {e}")
+        logging.error(f"Input validation failed: {e}")
         raise ValueError(f"Invalid input: {e}")
     
     # Initialize and run workflow engine
@@ -142,7 +142,7 @@ def main():
         
         # Display comprehensive results
         print("\n" + "=" * 100)
-        print("📊 WORKFLOW SUMMARY")
+        print("WORKFLOW SUMMARY")
         print("=" * 100)
 
         status = result.get('workflow_status')
@@ -151,14 +151,14 @@ def main():
         # Display file analysis
         file_analysis = result.get('file_analysis_result')
         if file_analysis:
-            print(f"\n📄 FILE: {file_analysis.structure.file_name}")
+            print(f"\nFILE: {file_analysis.structure.file_name}")
             print(f"   Rows: {file_analysis.structure.total_rows}")
             print(f"   Columns: {file_analysis.structure.total_columns}")
 
         # Display RAG matching results
         rag_result = result.get('rag_match_result')
         if rag_result:
-            print(f"\n🔍 RAG MATCHES: {len(rag_result.matched_tables)} candidate tables found")
+            print(f"\nRAG MATCHES: {len(rag_result.matched_tables)} candidate tables found")
             print(f"\n   Top 5 Candidates:")
             for i, match in enumerate(rag_result.matched_tables[:5], 1):
                 print(f"   {i}. {match.table_name:30s} (score: {match.similarity_score:.3f}, confidence: {match.confidence})")
@@ -166,7 +166,7 @@ def main():
         opportunity_match = next((m for m in rag_result.matched_tables if m.table_name == "Opportunity"), None)
         if opportunity_match:
             print("\n" + "=" * 100)
-            print("📋 OPPORTUNITY TABLE METADATA")
+            print("OPPORTUNITY TABLE METADATA")
             print("=" * 100)
             print(opportunity_match)
             
@@ -175,61 +175,27 @@ def main():
 
             mapping = result['field_mapping_result']
 
-            print("\n" + "=" * 100)
-            print("🎯 FIELD MAPPINGS")
-            print("=" * 100)
-            print("Import file fields                        → Target database fields                  Confidence      Type")
-            print("-" * 100)
-            for m in mapping.mappings:
-                # Safely coerce confidence to float and handle None or string values
-                raw_conf = getattr(m, 'confidence_score', 0.0)
-                try:
-                    conf = float(raw_conf) if raw_conf is not None else 0.0
-                except Exception:
-                    try:
-                        s = str(raw_conf).strip()
-                        if s.endswith('%'):
-                            conf = float(s.strip('%')) / 100.0
-                        else:
-                            conf = float(s)
-                    except Exception:
-                        conf = 0.0
-                # Clamp between 0 and 1
-                conf = max(0.0, min(1.0, conf))
-                confidence_bat = "█" * int(conf * 10)
-                conf_display = f"{conf:.2f}"
-                print(f"{m.source_column:<40} → {m.target_column or 'None':<40} {conf_display:>6} {confidence_bat:<10} {m.match_type}")
-            
-            #Unmapped columns
-            # unmapped = [m for m in mapping.mappings if m.match_type == 'UNMAPPED']
-            # if unmapped:
-            #     print("\n" + "=" * 100)
-            #     print("❌ UNMAPPED COLUMNS")
-            #     print("=" * 100)
-            #     for m in unmapped:
-            #         print(f"{m.source_column}")
-            # print(f"\nMAPPING RESULT:\n\n {mapping} \n")
-            
+            # Check if this is multi-table mapping result
             if hasattr(mapping, 'table_mappings'):
                 # Multi-table result
                 print("\n" + "=" * 100)
-                print("🎯 MULTI-TABLE MAPPING RESULTS")
+                print("MULTI-TABLE MAPPING RESULTS")
                 print("=" * 100)
                 
                 total = sum(len(tm.mappings) for tm in mapping.table_mappings)
-                print(f"\n📈 OVERALL STATISTICS:")
+                print(f"\nOVERALL STATISTICS:")
                 print(f"   Total Source Columns: {mapping.total_source_columns}")
                 print(f"   Mapped Columns: {total}")
                 print(f"   Unmapped Columns: {len(mapping.unmapped_columns)}")
                 print(f"   Coverage: {mapping.overall_coverage:.1f}%")
                 print(f"   Overall Confidence: {mapping.overall_confidence}")
-                print(f"   Valid: {'✅ Yes' if mapping.is_valid else '❌ No'}")
-                print(f"   Requires Review: {'⚠️  Yes' if mapping.requires_review else '✅ No'}")
+                print(f"   Valid: {'Yes' if mapping.is_valid else 'No'}")
+                print(f"   Requires Review: {'Yes' if mapping.requires_review else 'No'}")
                 print(f"   Tables Used: {len(mapping.table_mappings)}")
                 
                 # Display detailed mappings by table
                 print("\n" + "=" * 100)
-                print("📋 DETAILED MAPPINGS BY TABLE")
+                print("DETAILED MAPPINGS BY TABLE")
                 print("=" * 100)
                 
                 for table_idx, table_mapping in enumerate(mapping.table_mappings, 1):
@@ -238,7 +204,7 @@ def main():
                     print(f"{'=' * 100}")
                     print(f"Insertion Order: {table_mapping.insertion_order}")
                     print(f"Columns Mapped: {len(table_mapping.mappings)}")
-                    print(f"Confidence Score: {table_mapping.confidence_score:.2f}")
+                    print(f"Confidence Score: {table_mapping.confidence:.2f}")
                     print(f"Coverage: {table_mapping.validation.mapping_coverage_percent:.1f}%")
                     print(f"Confidence Level: {table_mapping.validation.confidence_level}")
                     
@@ -252,19 +218,19 @@ def main():
                     
                     # Show validation issues/warnings
                     if table_mapping.validation.issues:
-                        print(f"\n⚠️  ISSUES:")
+                        print(f"\nISSUES:")
                         for issue in table_mapping.validation.issues:
                             print(f"   - {issue}")
                     
                     if table_mapping.validation.warnings:
-                        print(f"\n⚠️  WARNINGS:")
+                        print(f"\nWARNINGS:")
                         for warning in table_mapping.validation.warnings[:3]:
                             print(f"   - {warning}")
                 
                 # Display unmapped columns
                 if mapping.unmapped_columns:
                     print(f"\n{'=' * 100}")
-                    print(f"❌ UNMAPPED COLUMNS ({len(mapping.unmapped_columns)})")
+                    print(f"UNMAPPED COLUMNS ({len(mapping.unmapped_columns)})")
                     print(f"{'=' * 100}")
                     
                     for col in mapping.unmapped_columns:
@@ -279,11 +245,11 @@ def main():
                 
                 # Analysis & Recommendations
                 print("\n" + "=" * 100)
-                print("💡 ANALYSIS & RECOMMENDATIONS")
+                print("ANALYSIS & RECOMMENDATIONS")
                 print("=" * 100)
                 
                 if len(mapping.table_mappings) == 1:
-                    print("\n⚠️  Only mapped to 1 table")
+                    print("\nOnly mapped to 1 table")
                     print("   This means the multi-table mapper didn't distribute columns across multiple tables.")
                     print("\n   POSSIBLE REASONS:")
                     print("   1. Thresholds are too high (min_confidence_threshold = 0.5)")
@@ -297,23 +263,23 @@ def main():
                     print("   ✓ Force distribution across entity vs relation tables")
                 
                 if mapping.unmapped_columns:
-                    print(f"\n⚠️  {len(mapping.unmapped_columns)} columns remain unmapped")
+                    print(f"\n{len(mapping.unmapped_columns)} columns remain unmapped")
                     print("   Consider reviewing these columns for potential table assignments")
         
         # Final status
         if status == 'requires_review':
             print("\n" + "=" * 100)
-            print("⚠️  Workflow requires human review")
+            print("Workflow requires human review")
             print("=" * 100)
             sys.exit(2)
         elif status == 'failed':
             print("\n" + "=" * 100)
-            print(f"❌ Workflow failed: {result.get('last_error')}")
+            print(f"Workflow failed: {result.get('last_error')}")
             print("=" * 100)
             sys.exit(1)
         else:
             print("\n" + "=" * 100)
-            print("✅ Workflow completed successfully")
+            print("Workflow completed successfully")
             print("=" * 100)
             sys.exit(0)
             

@@ -6,13 +6,12 @@ Includes: semantic grouping, relationship detection, refinement, and judge.
 import logging
 import json
 import re
-from typing import List, Dict, Any, Optional, Set, Tuple
+from typing import List, Dict, Any, Optional
 from difflib import SequenceMatcher
 from openai import OpenAI
 from ..models.file_analysis_model import FileAnalysisResult, ColumnMetadata
 from ..models.rag_match_model import (
     FieldMapping, 
-    FieldMappingResult, 
     MappingValidationResult,
     TableFieldMapping,
     MultiTableMappingResult
@@ -40,8 +39,8 @@ class Mapper:
         ]
         
         # Penalties
-        self.generic_field_penalty = 0.5  # 50% reduction
-        self.type_mismatch_penalty = 0.6  # 40% reduction
+        self.generic_field_penalty = 0.5
+        self.type_mismatch_penalty = 0.6
         
         # Refinement settings
         self.max_same_field_mappings = 2

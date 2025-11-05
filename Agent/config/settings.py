@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from .constants import (
     DEFAULT_LLM_MODEL,
     DEFAULT_TEMPERATURE,
-    DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_MAX_REFINEMENTS,
     DEFAULT_RAG_COLLECTION
 )
@@ -42,7 +41,7 @@ class Settings(BaseModel):
         'validate_assignment': True,  # Validate on attribute assignment
         'arbitrary_types_allowed': False
     }
-    
+
     @field_validator('openai_api_key')
     @classmethod
     def validate_openai_key(cls, v):

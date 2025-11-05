@@ -255,12 +255,6 @@ def main():
                     print("   1. Thresholds are too high (min_confidence_threshold = 0.5)")
                     print("   2. Other tables didn't have good field matches")
                     print("   3. Semantic grouping assigned everything to one table")
-                    
-                    print("\n   RECOMMENDATIONS:")
-                    print("   ✓ Lower min_confidence_threshold to 0.3-0.4")
-                    print("   ✓ Check if unmapped columns belong to related tables")
-                    print("   ✓ Improve semantic grouping patterns")
-                    print("   ✓ Force distribution across entity vs relation tables")
                 
                 if mapping.unmapped_columns:
                     print(f"\n{len(mapping.unmapped_columns)} columns remain unmapped")

@@ -8,7 +8,9 @@ import json
 import re
 from typing import List, Dict, Any, Optional
 from difflib import SequenceMatcher
-from openai import OpenAI
+
+from .clients.openai_client import ResilientOpenAIClient
+from ..config import get_settings
 from ..models.file_analysis_model import FileAnalysisResult, ColumnMetadata
 from ..models.rag_match_model import (
     FieldMapping, 
@@ -17,12 +19,20 @@ from ..models.rag_match_model import (
     MultiTableMappingResult
 )
 
+settings = get_settings()
+
 
 class Mapper:
     def __init__(self, model: str = "gpt-4o", temperature: float = 0.1):
         self.model = model
         self.temperature = temperature
-        self.client = OpenAI()
+        # Use resilient client with retry logic and circuit breaker
+        self.client = ResilientOpenAIClient(
+            api_key=settings.openai_api_key,
+            model=model,
+            temperature=temperature,
+            max_retries=3
+        )
         
         # Matching thresholds
         self.exact_match_threshold = 1.0
@@ -835,18 +845,18 @@ class Mapper:
         return prompt
 
     def _batch_llm_call(self, prompt: str) -> Dict[str, Any]:
+        """Call LLM using resilient client with retry logic and circuit breaker."""
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
+            # Use resilient client's generate_completion method
+            response_text = self.client.generate_completion(
                 messages=[
                     {"role": "system", "content": self._get_system_prompt()},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=self.temperature,
                 response_format={"type": "json_object"}
             )
-            result_text = response.choices[0].message.content
-            result = json.loads(result_text)
+            
+            result = json.loads(response_text)
             return result if isinstance(result, dict) and "matches" in result else {"matches": []}
         except Exception as e:
             logging.error(f"Batch LLM call failed: {e}")

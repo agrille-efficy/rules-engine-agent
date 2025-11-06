@@ -2,7 +2,6 @@ from typing import List, Dict, Any
 import pandas as pd
 from langchain_core.documents import Document
 import os, json
-from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv(r'C:\Users\axel.grille\Documents\rules-engine-agent\Agent\.env')
@@ -41,7 +40,16 @@ class TableIngestionChunkBuilder:
         self.client = None
         if self.enable_llm_summary:
             try:
-                self.client = OpenAI()
+                # Use resilient client with retry logic and circuit breaker
+                from ..services.clients.openai_client import ResilientOpenAIClient
+                from ..config import get_settings
+                settings = get_settings()
+                self.client = ResilientOpenAIClient(
+                    api_key=settings.openai_api_key,
+                    model="gpt-4o-mini",
+                    temperature=0.2,
+                    max_retries=3
+                )
             except Exception:
                 self.enable_llm_summary = False
         self.relationship_graph = self._build_relationship_graph()
@@ -263,14 +271,11 @@ class TableIngestionChunkBuilder:
             f"Table: {table.get('stblName')}\nFields: {', '.join(field_names)}\nPurpose:"
         )
         try:
-            resp = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-                max_tokens=50
+            # Use resilient client's generate_completion method
+            text = self.client.generate_completion(
+                messages=[{"role": "user", "content": prompt}]
             )
-            text = resp.choices[0].message.content.strip()
-            return text
+            return text.strip()
         except Exception:
             return '<ADD BUSINESS PURPOSE HERE>'
 

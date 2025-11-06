@@ -54,7 +54,7 @@ class Settings(BaseModel):
     @classmethod
     def validate_model_name(cls, v):
         """Validate LLM model name"""
-        allowed_prefixes = ['gpt-3.5', 'gpt-4']
+        allowed_prefixes = ['gpt-4o', 'gpt-4']
         if not any(v.startswith(prefix) for prefix in allowed_prefixes):
             raise ValueError(f"Unsupported model: {v}. Must be GPT-3.5 or GPT-4 variant")
         return v

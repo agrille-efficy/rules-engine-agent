@@ -12,16 +12,21 @@ class UniversalTranslator:
         Initialize translator with OpenAI client.
         
         Args:
-            openai_client: Optional pre-configured OpenAI client. If None, creates one from settings.
+            openai_client: Optional pre-configured OpenAI client. If None, creates resilient client from settings.
         """
-        # Use provided client or create from settings
+        # Use provided client or create resilient client from settings
         if openai_client is not None:
             self.client = openai_client
         else:
-            # Get settings and create OpenAI client
-            from openai import OpenAI
+            # Use resilient client with retry logic and circuit breaker
+            from .clients.openai_client import ResilientOpenAIClient
             settings = get_settings()
-            self.client = OpenAI(api_key=settings.openai_api_key)
+            self.client = ResilientOpenAIClient(
+                api_key=settings.openai_api_key,
+                model="gpt-4",
+                temperature=0.1,
+                max_retries=3
+            )
         
         self.translation_cache = {}  # Cache translations to avoid repeated API calls
         
@@ -143,17 +148,15 @@ Column names to translate:
 English translations:"""
 
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4",
+            # Use resilient client's generate_completion method
+            response_text = self.client.generate_completion(
                 messages=[
                     {"role": "system", "content": "You are an expert database architect who translates field names to standard English database conventions."},
                     {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=500
+                ]
             )
             
-            translated_lines = response.choices[0].message.content.strip().split('\n')
+            translated_lines = response_text.strip().split('\n')
             
             # Parse results and create mapping
             translations = {}
@@ -191,17 +194,15 @@ English translations:"""
 English translation:"""
 
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4",
+            # Use resilient client's generate_completion method
+            response_text = self.client.generate_completion(
                 messages=[
                     {"role": "system", "content": "You are a business translator. Translate to clear, professional English."},
                     {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=200
+                ]
             )
             
-            return response.choices[0].message.content.strip()
+            return response_text.strip()
             
         except Exception as e:
             logging.error(f"Context translation failed: {e}")

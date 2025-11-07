@@ -1,4 +1,0 @@
-﻿[flake8]
-# Ignore line too long (E501) and other common formatting issues
-ignore = E501
-

@@ -1,0 +1,28 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	file_analysis(file_analysis)
+	rag_matching(rag_matching)
+	table_selection(table_selection)
+	field_mapping(field_mapping)
+	error(error)
+	review(review)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> file_analysis;
+	field_mapping -.-> error;
+	field_mapping -.-> review;
+	file_analysis -.-> error;
+	file_analysis -.-> rag_matching;
+	rag_matching -.-> error;
+	rag_matching -.-> table_selection;
+	table_selection -.-> error;
+	table_selection -.-> field_mapping;
+	error --> __end__;
+	review --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

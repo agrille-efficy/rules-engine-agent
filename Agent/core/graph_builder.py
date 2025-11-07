@@ -56,13 +56,11 @@ class WorkflowGraphBuilder:
         graph.add_node("error", self._error_handler_node)
         graph.add_node("review", self._review_handler_node)
         
-        # Set entry point
+        
         graph.set_entry_point("file_analysis")
         
-        # Add conditional edges with routing logic
         logging.info("Adding conditional edges...")
         
-        # After file analysis -> rag_matching or error
         graph.add_conditional_edges(
             "file_analysis",
             route_after_file_analysis,
@@ -72,7 +70,6 @@ class WorkflowGraphBuilder:
             }
         )
         
-        # After RAG matching -> table_selection or error
         graph.add_conditional_edges(
             "rag_matching",
             route_after_rag_matching,
@@ -82,7 +79,6 @@ class WorkflowGraphBuilder:
             }
         )
         
-        # After table selection -> field_mapping or error
         graph.add_conditional_edges(
             "table_selection",
             route_after_table_selection,
@@ -92,7 +88,6 @@ class WorkflowGraphBuilder:
             }
         )
         
-        # After field mapping -> validation/review/error/end
         graph.add_conditional_edges(
             "field_mapping",
             route_after_field_mapping,
@@ -104,7 +99,6 @@ class WorkflowGraphBuilder:
             }
         )
         
-        # Error and review nodes end the workflow
         graph.add_edge("error", END)
         graph.add_edge("review", END)
         
@@ -157,9 +151,7 @@ class WorkflowGraphBuilder:
         
         mapping_result = state.get("field_mapping_result")
         if mapping_result:
-            # Check if multi-table mapping (has 'table_mappings' attribute)
             if hasattr(mapping_result, 'table_mappings'):
-                # Multi-table mapping result
                 logging.warning(f"Mapping coverage: {mapping_result.overall_coverage:.1f}%")
                 logging.warning(f"Confidence level: {mapping_result.overall_confidence}")
                 logging.warning(f"Valid: {mapping_result.is_valid}")
@@ -173,7 +165,6 @@ class WorkflowGraphBuilder:
                     for col in mapping_result.unmapped_columns[:5]:
                         logging.warning(f"  - {col}")
             else:
-                # Single-table mapping result
                 validation = mapping_result.validation
                 
                 logging.warning(f"Mapping coverage: {validation.mapping_coverage_percent:.1f}%")
@@ -208,30 +199,7 @@ class WorkflowGraphBuilder:
         try:
             graph = self.build()
             
-            # # Try to generate ASCII representation
-            # logging.info("Workflow Graph Structure:")
-            # logging.info("=" * 80)
-            # logging.info("START")
-            # logging.info("  ↓")
-            # logging.info("file_analysis")
-            # logging.info("  ├─→ rag_matching (if success)")
-            # logging.info("  └─→ error (if failed)")
-            # logging.info("      ↓")
-            # logging.info("rag_matching")
-            # logging.info("  ├─→ table_selection (if matches found)")
-            # logging.info("  └─→ error (if no matches)")
-            # logging.info("      ↓")
-            # logging.info("table_selection")
-            # logging.info("  ├─→ field_mapping (if table selected)")
-            # logging.info("  └─→ error (if failed)")
-            # logging.info("      ↓")
-            # logging.info("field_mapping")
-            # logging.info("  ├─→ END (if valid)")
-            # logging.info("  ├─→ review (if needs review)")
-            # logging.info("  └─→ error (if failed)")
-            # logging.info("=" * 80)
-            
-            if output_path:
+            if graph:
                 logging.info(f"Graph visualization would be saved to: {output_path}")
                 
         except Exception as e:

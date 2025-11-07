@@ -26,7 +26,6 @@ class Mapper:
     def __init__(self, model: str = "gpt-4o", temperature: float = 0.1):
         self.model = model
         self.temperature = temperature
-        # Use resilient client with retry logic and circuit breaker
         self.client = ResilientOpenAIClient(
             api_key=settings.openai_api_key,
             model=model,
@@ -133,10 +132,6 @@ class Mapper:
         self._log_summary(result)
         
         return result
-
-    # ============================================================================
-    # SEMANTIC GROUPING
-    # ============================================================================
     
     def _group_columns_semantically(self, file_analysis: FileAnalysisResult) -> Dict[str, List[str]]:
         """
@@ -198,10 +193,6 @@ class Mapper:
         filtered_groups = {k: v for k, v in groups.items() if v}
         logging.info(f"Semantic grouping: {', '.join([f'{k}({len(v)})' for k, v in filtered_groups.items()])}")
         return filtered_groups
-
-    # ============================================================================
-    # MULTI-STRATEGY MAPPING (Exact, Fuzzy, Semantic, LLM)
-    # ============================================================================
     
     def _map_columns_to_all_tables(
         self,
@@ -385,9 +376,6 @@ class Mapper:
             words.extend(re.findall(r'[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\d|\W|$)|\d+', part))
         return [w.lower() for w in words if w]
 
-    # ============================================================================
-    # BATCH LLM MAPPING
-    # ============================================================================
     
     def _batch_llm_mapping(
         self,
@@ -442,9 +430,6 @@ class Mapper:
         
         return results
 
-    # ============================================================================
-    # SMART MULTI-TABLE ASSIGNMENT
-    # ============================================================================
     
     def _smart_multi_table_assignment(
         self,
@@ -511,10 +496,6 @@ class Mapper:
                 assigned_columns.add(col_name)
         
         return table_assignments
-
-    # ============================================================================
-    # JUDGE - Decides if refinement is needed
-    # ============================================================================
     
     def _judge_needs_refinement(
         self,
@@ -570,10 +551,6 @@ class Mapper:
             return True
         
         return False
-
-    # ============================================================================
-    # REFINER - Removes suspicious mappings
-    # ============================================================================
     
     def _refine_all_table_mappings(
         self,
@@ -649,9 +626,6 @@ class Mapper:
         
         return refined_mappings
 
-    # ============================================================================
-    # VALIDATION & FILTERING
-    # ============================================================================
     
     def _filter_and_validate_table_mappings(
         self,
@@ -707,10 +681,6 @@ class Mapper:
         
         table_mappings.sort(key=lambda x: x.insertion_order)
         return table_mappings
-
-    # ============================================================================
-    # RESULT CREATION & LOGGING
-    # ============================================================================
     
     def _create_final_result(
         self,
@@ -781,10 +751,6 @@ class Mapper:
             logging.warning(f"     {', '.join(result.unmapped_columns[:10])}")
         
         logging.info("=" * 80)
-
-    # ============================================================================
-    # HELPER METHODS
-    # ============================================================================
     
     def _prepare_table_schemas(self, candidate_tables: List[Dict]) -> Dict:
         """Prepare table schemas from candidate tables."""

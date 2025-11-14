@@ -343,10 +343,10 @@ class PipelineInput(BaseModel):
 
 class LLMConfigInput(BaseModel):
     """Validated LLM configuration"""
-    model: str = Field(default="gpt-4", pattern=r'^[a-zA-Z0-9\-\.]+$')
+    model: str = Field(default="gpt-4o", pattern=r'^[a-zA-Z0-9\-\.]+$')
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=None, ge=1, le=32000)
-    top_k: int = Field(default=10, ge=1, le=100)
+    top_k: int = Field(default=1, ge=1, le=100)
     
     @field_validator('model')
     @classmethod
@@ -355,7 +355,7 @@ class LLMConfigInput(BaseModel):
         # Only allow known OpenAI model patterns
         allowed_patterns = [
             r'^gpt-3\.5-turbo',
-            r'^gpt-4',
+            r'^gpt-4o',
             r'^text-embedding-',
         ]
         

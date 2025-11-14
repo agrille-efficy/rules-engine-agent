@@ -251,9 +251,9 @@ class TestLLMConfigValidation:
     """Test LLM configuration validation"""
     
     def test_valid_gpt4_model(self):
-        """Valid GPT-4 model should pass"""
-        validated = LLMConfigInput(model="gpt-4-turbo")
-        assert validated.model == "gpt-4-turbo"
+        """Valid GPT-4o model should pass"""
+        validated = LLMConfigInput(model="gpt-4o-turbo")
+        assert validated.model == "gpt-4o-turbo"
     
     def test_invalid_model_name(self):
         """Invalid model name should fail"""

@@ -53,7 +53,7 @@ def field_mapping_node(state: WorkflowState) -> WorkflowState:
             file_analysis=file_analysis,
             candidate_tables=candidate_tables,
             primary_table=selected_table,
-            max_tables=15
+            max_tables=10  
         )
         
         # Log results

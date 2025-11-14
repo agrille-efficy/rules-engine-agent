@@ -54,9 +54,9 @@ class Settings(BaseModel):
     @classmethod
     def validate_model_name(cls, v):
         """Validate LLM model name"""
-        allowed_prefixes = ['gpt-4o', 'gpt-4']
+        allowed_prefixes = ['gpt-4o', 'gpt-4o']
         if not any(v.startswith(prefix) for prefix in allowed_prefixes):
-            raise ValueError(f"Unsupported model: {v}. Must be GPT-3.5 or GPT-4 variant")
+            raise ValueError(f"Unsupported model: {v}. Must be GPT-3.5 or GPT-4o variant")
         return v
     
     @field_validator('qdrant_url')

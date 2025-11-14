@@ -576,6 +576,11 @@ class TableIngestionChunkBuilder:
             parts.append(f"- {field_name} ({field_code}): {field_type}{size} | {nullable}")
         
         parts.append("")
+
+
+
+
+
         
         # Add group-specific guidance
         if group_name == "relationships":

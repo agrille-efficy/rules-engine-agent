@@ -29,7 +29,7 @@ class ResilientOpenAIClient:
     def __init__(
         self,
         api_key: str,
-        model: str = "gpt-4",
+        model: str = "gpt-4o",
         temperature: float = 0.3,
         max_retries: int = 3,
         circuit_config: Optional[CircuitBreakerConfig] = None
@@ -39,7 +39,7 @@ class ResilientOpenAIClient:
         
         Args:
             api_key: OpenAI API key
-            model: Model name (default: gpt-4)
+            model: Model name (default: gpt-4o)
             temperature: Temperature for generation (default: 0.3)
             max_retries: Maximum retry attempts (default: 3)
             circuit_config: Optional circuit breaker configuration

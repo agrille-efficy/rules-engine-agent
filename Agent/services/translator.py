@@ -23,7 +23,7 @@ class UniversalTranslator:
             settings = get_settings()
             self.client = ResilientOpenAIClient(
                 api_key=settings.openai_api_key,
-                model="gpt-4",
+                model="gpt-4o",
                 temperature=0.1,
                 max_retries=3
             )

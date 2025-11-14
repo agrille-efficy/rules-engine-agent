@@ -47,7 +47,7 @@ def rag_matching_node(state: WorkflowState) -> WorkflowState:
             logging.info(f"  Confidence: {match_result.primary_match.confidence}")
 
         logging.info(f"Top matches:")
-        for i, match in enumerate(match_result.matched_tables[:5], 1):
+        for i, match in enumerate(match_result.matched_tables[:1], 1):
             logging.info(f"  {i}. {match.table_name} (score: {match.similarity_score:.2f}, confidence: {match.confidence})")
 
         basename = os.path.basename(state["file_path"])

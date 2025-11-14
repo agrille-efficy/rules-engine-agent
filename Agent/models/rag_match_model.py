@@ -39,6 +39,7 @@ class FieldMapping:
     target_data_type: Optional[str] = None
     sample_source_values: List[Any] = field(default_factory=list)
     validation_notes: List[str] = field(default_factory=list)
+    score_detail: Optional['MatchScoreDetail'] = None  # Detailed scoring breakdown
 
 @dataclass
 class MappingValidationResult:
@@ -170,3 +171,32 @@ class MultiTableMappingResult:
     is_valid: bool
     requires_review: bool
     requires_refinement: bool = False
+
+@dataclass
+class MatchScoreDetail:
+    """Detailed breakdown of weighted matching scores."""
+    exact_score: float = 0.0          # Raw exact match score (0.0 or 1.0)
+    fuzzy_score: float = 0.0          # Raw fuzzy similarity score (0.0-1.0)
+    semantic_score: float = 0.0       # Raw semantic similarity score (0.0-1.0)
+    exact_weight: float = 0.5         # Weight applied to exact score
+    fuzzy_weight: float = 0.3         # Weight applied to fuzzy score
+    semantic_weight: float = 0.2      # Weight applied to semantic score
+    weighted_score: float = 0.0       # Final weighted combination
+    penalties_applied: List[str] = field(default_factory=list)  # List of penalties applied
+    primary_method: str = "unknown"   # Which method contributed most (exact/fuzzy/semantic)
+    
+    def calculate_weighted_score(self) -> float:
+        """Calculate the final weighted score."""
+        self.weighted_score = (
+            self.exact_score * self.exact_weight +
+            self.fuzzy_score * self.fuzzy_weight +
+            self.semantic_score * self.semantic_weight
+        )
+        return self.weighted_score
+    
+    def get_score_breakdown(self) -> str:
+        """Get a formatted string showing the score breakdown."""
+        return (f"E:{self.exact_score:.2f}×{self.exact_weight} + "
+                f"F:{self.fuzzy_score:.2f}×{self.fuzzy_weight} + "
+                f"S:{self.semantic_score:.2f}×{self.semantic_weight} = "
+                f"{self.weighted_score:.2f}")

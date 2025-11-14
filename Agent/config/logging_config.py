@@ -13,7 +13,7 @@ from pythonjsonlogger import jsonlogger
 
 
 def setup_structured_logging(
-    log_level: str = "INFO",
+    log_level: str = "DEBUG",  # Changed from INFO to DEBUG
     log_file: Optional[str] = None,
     json_logs: bool = True,
     service_name: str = "rules-engine-agent"

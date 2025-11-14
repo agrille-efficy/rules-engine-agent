@@ -77,7 +77,7 @@ An automated agent that:
 - **Exact matching:** Direct name matches
 - **Fuzzy matching:** String similarity algorithms
 - **Semantic matching:** Word overlap and prefix detection
-- **LLM-based matching:** GPT-4 for complex cases
+- **LLM-based matching:** GPT-4o for complex cases
 
 #### 2.1.4 Quality Assurance
 - Judge system analyzes mapping quality
@@ -145,7 +145,7 @@ The Rules Engine Agent integrates with:
    - Maintains knowledge base of historical mappings
 
 3. **OpenAI API**
-   - GPT-4 for semantic understanding
+   - GPT-4o for semantic understanding
    - Embeddings for vector search
    - LLM-based field matching for complex cases
 
@@ -174,33 +174,33 @@ Data Source → Rules Engine Agent → Validated Mappings → ETL Pipeline → D
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Rules Engine Agent                       │
+│                     Rules Engine Agent                      │
 ├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │           Workflow Engine (LangGraph)                 │  │
-│  │  ┌────────────────────────────────────────────────┐  │  │
-│  │  │  State Machine with Conditional Routing         │  │  │
-│  │  │  - Checkpointing for resilience                 │  │  │
-│  │  │  - Step-by-step execution tracking              │  │  │
-│  │  └────────────────────────────────────────────────┘  │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                                                               │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │ File Analysis│  │ RAG Matching │  │Table Selection│     │
-│  │     Node     │→ │     Node     │→ │     Node      │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-│                                              ↓               │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │           Workflow Engine (LangGraph)                │   │
+│  │  ┌────────────────────────────────────────────────┐  │   │
+│  │  │  State Machine with Conditional Routing        │  │   │
+│  │  │  - Checkpointing for resilience                │  │   │
+│  │  │  - Step-by-step execution tracking             │  │   │
+│  │  └────────────────────────────────────────────────┘  │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │ File Analysis│  │ RAG Matching │  │Table Selection│      │
+│  │     Node     │→ │     Node     │→ │     Node      │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘       │
+│                                              ↓              │
 │                                    ┌──────────────┐         │
 │                                    │Field Mapping │         │
 │                                    │     Node     │         │
 │                                    └──────────────┘         │
-│                                                               │
+│                                                             │
 └─────────────────────────────────────────────────────────────┘
          ↓                    ↓                    ↓
 ┌────────────────┐  ┌────────────────┐  ┌──────────────────┐
 │  OpenAI API    │  │  Qdrant Vector │  │  Efficy DICO API │
-│  (GPT-4)       │  │  Database      │  │  (Schema Source) │
+│  (GPT-4o)      │  │  Database      │  │  (Schema Source) │
 └────────────────┘  └────────────────┘  └──────────────────┘
 ```
 
@@ -595,7 +595,7 @@ For each column, tries 4 strategies:
 1. **Exact Match:** Direct name equality (confidence: 1.0)
 2. **Fuzzy Match:** String similarity via Levenshtein (threshold: 0.69)
 3. **Semantic Match:** Word overlap, prefix matching (threshold: 0.6)
-4. **LLM Match:** GPT-4 batch inference for complex cases (threshold: 0.5)
+4. **LLM Match:** GPT-4o batch inference for complex cases (threshold: 0.5)
 
 **Step 3: Smart Multi-Table Assignment**
 Distributes columns across multiple tables:
@@ -744,7 +744,7 @@ Populates Qdrant with database schema:
    - Exact: 1.0 confidence for identical names
    - Fuzzy: Levenshtein similarity (threshold: 0.69)
    - Semantic: Word overlap + prefix (threshold: 0.6)
-   - LLM: GPT-4 batch inference (threshold: 0.5)
+   - LLM: GPT-4o batch inference (threshold: 0.5)
 
 2. **Penalties:**
    - Generic field penalty: 0.5x (metadata, memo, blob)
@@ -1099,7 +1099,7 @@ class UserContextInput(BaseModel):
 
 **External Services:**
 1. **OpenAI Account:**
-   - API key with GPT-4 access
+   - API key with GPT-4o access
    - Sufficient credits for embeddings and completions
 
 2. **Qdrant Instance:**
